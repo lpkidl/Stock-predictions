@@ -62,6 +62,23 @@ class Settings(BaseSettings):
     # Minimum training rows required before training a regime-specific model
     REGIME_MIN_ROWS: int = 80
 
+    # Alpha Vantage API (Layer 1 — dual data ingestion)
+    ALPHA_VANTAGE_API_KEY: Optional[str] = None   # set in .env: ALPHA_VANTAGE_API_KEY=...
+
+    # PRAW / Reddit OAuth credentials (Layer 1 — social stream via praw library)
+    # Create a "script" app at https://www.reddit.com/prefs/apps, then set in .env:
+    PRAW_CLIENT_ID:     Optional[str] = None
+    PRAW_CLIENT_SECRET: Optional[str] = None
+    # Must be descriptive per Reddit API rules: "AppName/Version by u/username"
+    PRAW_USER_AGENT: str = "StockForecaster/1.0 by u/your_reddit_username"
+
+    # ExecutionEngine risk parameters (Layer 4 — risk management)
+    ATR_MULTIPLIER_SL: float = 2.0    # Stop-Loss = entry ± (2 × ATR)
+    ATR_MULTIPLIER_TP: float = 3.0    # Take-Profit = entry ± (3 × ATR) → 1.5:1 R/R
+    POSITION_RISK_PCT: float = 0.01   # Risk 1% of account per trade
+    ACCOUNT_SIZE:      float = 100_000.0  # Simulated account equity ($)
+    MIN_TRADE_CONFIDENCE: float = 0.50    # Applied to blended (ML + technical) confidence
+
     # Rate limiting
     REDDIT_DELAY: float = 2.0
     X_DELAY: float = 3.0
@@ -82,6 +99,17 @@ class Settings(BaseSettings):
         "early_stopping_rounds": 20,
     }
     
+    # Walk-forward backtesting
+    WF_MIN_TRAIN: int = 200   # minimum bars before the first out-of-sample window
+    WF_STEP: int = 21         # bars to advance the training cutoff each fold (~1 month)
+    WF_TEST_WINDOW: int = 21  # bars per out-of-sample evaluation window
+
+    # Performance tracking
+    PERFORMANCE_LEDGER_PATH: str = "results/performance_ledger.json"
+
+    # Scheduler (cron expression used by scheduler.py)
+    SCHEDULER_CRON: str = "0 16 * * 1-5"  # 4 pm ET, Mon–Fri (after US market close)
+
     # Legacy — kept so old references don't break; not used by the new classifier
     TRAIN_TEST_SPLIT_RATIO: float = 0.8
     FORECAST_DAYS: int = 5

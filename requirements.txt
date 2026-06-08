@@ -29,3 +29,16 @@ python-dotenv>=1.0.0
 # Logging and utilities
 python-dateutil>=2.8.0
 pytz>=2023.3.post1
+
+# Scheduler
+apscheduler>=3.10.0
+
+# feature_engine — Layer 1-4 additions
+# praw: PRAW Reddit API wrapper (read-only social stream)
+praw>=7.7.1
+# pandas-ta: optional accelerator for TechnicalIndicatorEngine.
+# All indicators (Ichimoku, ATR, ADX, BBW) are implemented in pure pandas/numpy
+# and work without this package.  Install only if pandas-ta supports your Python
+# version (requires Python <3.14 due to its numba dependency as of mid-2025):
+#   pip install pandas-ta==0.4.71b0
+# pandas-ta  # uncomment when using Python <=3.13
