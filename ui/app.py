@@ -121,7 +121,20 @@ def load_results():
         _load_json("predictions.json"),
         _load_json("feature_importance.json"),
         _load_json("model_metrics.json"),
+        _load_json("trade_logs.json"),
+        _load_prediction_history(),
     )
+
+
+def _load_prediction_history() -> list:
+    path = RESULTS_DIR / "prediction_history.json"
+    if not path.exists():
+        return []
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return []
 
 
 @st.cache_data(ttl=300)
@@ -620,7 +633,7 @@ def main():
     )
     st.divider()
 
-    predictions, feature_importance, metrics = load_results()
+    predictions, feature_importance, metrics, trade_logs, pred_history = load_results()
     tickers = settings.STOCK_TICKERS.split(",")
     cfg     = render_sidebar(tickers)
     ticker  = cfg["ticker"]
@@ -656,8 +669,8 @@ def main():
     st.write("")
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
-    tab1, tab2, tab3 = st.tabs(
-        ["📊  Price Chart", "🤖  Model Performance", "🔍  All Tickers"]
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["📊  Price Chart", "🤖  Model Performance", "🔍  All Tickers", "⚡  Trade Execution", "📈  Track Record"]
     )
 
     with tab1:
@@ -771,6 +784,402 @@ Above 80 = overbought; below 20 = oversold.
 **Days to Earnings / Earnings Imminent** — captures pre-earnings volatility.
 
 **Volume Ratio** — today's volume vs. 20-day average. Above 1.5 = unusually heavy.
+""")
+
+    with tab4:
+        st.write("")
+        st.markdown("### ⚡ Stage 4 — ATR-Based Trade Execution")
+        st.caption(
+            "Each ML prediction is cross-checked against 4 technical indicators before a trade fires. "
+            "The final decision uses a blended score: 65% ML model confidence + 35% technical confirmation. "
+            "A trade only executes when the blended score clears 50% and the model has a clear direction (UP or DOWN)."
+        )
+        st.write("")
+
+        if not trade_logs:
+            st.info("No trade log data yet — run the pipeline first (`python main.py`).")
+        else:
+            active  = [v for v in trade_logs.values() if v.get("action") not in ("skip", None)]
+            skipped = [v for v in trade_logs.values() if v.get("action") == "skip"]
+
+            # ── Run timestamp ────────────────────────────────────────────────
+            any_ts = next((v.get("timestamp") for v in trade_logs.values() if v.get("timestamp")), None)
+            if any_ts:
+                ts_str = any_ts[:19].replace("T", " ")
+                st.caption(f"Last pipeline run: {ts_str} UTC")
+
+            # ── Summary metrics ──────────────────────────────────────────────
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Tickers Evaluated", len(trade_logs))
+            m2.metric("Active Trades", len(active),
+                      help="Trades that passed both confidence threshold and direction check")
+            m3.metric("Skipped", len(skipped),
+                      help="Insufficient confidence, flat direction, or no clear ML signal")
+            total_risk   = sum(v.get("dollar_risk",   0) for v in active)
+            total_reward = sum(v.get("dollar_reward", 0) for v in active)
+            m4.metric("Total Exposure", f"${total_risk:,.0f} risked",
+                      help=f"Max reward if all TPs hit: ${total_reward:,.0f}")
+
+            st.divider()
+
+            # ── Active trade cards ───────────────────────────────────────────
+            if active:
+                st.markdown("#### Active Trade Signals")
+                st.caption(
+                    "These tickers passed all filters. Position size is calculated so that "
+                    "hitting the Stop-Loss costs exactly 1% of the $100,000 account ($1,000)."
+                )
+                st.write("")
+
+                SIGNAL_LABELS = {
+                    "ichimoku_tk":    ("Ichimoku T/K Cross",
+                                       "Tenkan-sen vs Kijun-sen crossover aligns with direction"),
+                    "ichimoku_cloud": ("Ichimoku Cloud",
+                                       "Price is above (long) or below (short) both Senkou A & B"),
+                    "adx_di":         ("ADX Trend Strength",
+                                       "ADX > 20 confirms an active trend; +DI/-DI confirm direction"),
+                    "bbw_regime":     ("BBW Volatility Gate",
+                                       "Bollinger Band Width 0.01–0.12: not too quiet, not in panic mode"),
+                }
+
+                for log in active:
+                    is_long      = log["action"] == "long"
+                    action_color = "#22c55e" if is_long else "#ef4444"
+                    action_label = "LONG  ↑" if is_long else "SHORT  ↓"
+                    direction_word = "long (buy)" if is_long else "short (sell)"
+
+                    st.markdown(
+                        f"<div style='border-left:4px solid {action_color};"
+                        f"padding:10px 16px;border-radius:4px;"
+                        f"background:rgba(0,0,0,0.03);margin-bottom:8px'>"
+                        f"<span style='background:{action_color};color:white;"
+                        f"padding:3px 12px;border-radius:4px;font-weight:bold;font-size:0.95em'>"
+                        f"{action_label}</span>"
+                        f"&nbsp;&nbsp;<span style='font-size:1.2em;font-weight:bold'>"
+                        f"{log['ticker']}</span>"
+                        f"&nbsp;&nbsp;<span style='color:#6b7280;font-size:0.85em'>"
+                        f"1-day horizon · ATR ${log.get('atr_used', 0):.2f}/day</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    # Price levels
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric(
+                        "Entry Price",
+                        f"${log['entry_price']:,.2f}",
+                        help="Last closing price — this is where the trade would open",
+                    )
+                    # SL distance label is direction-aware: SHORT has SL above entry
+                    sl_dist = log["sl_distance"]
+                    sl_dir  = f"+${sl_dist:.2f} above entry" if not is_long else f"-${sl_dist:.2f} below entry"
+                    c2.metric(
+                        "Stop-Loss",
+                        f"${log['stop_loss']:,.2f}",
+                        delta=sl_dir,
+                        delta_color="off",
+                        help=f"Exit with a loss if price reaches this level ({sl_dir}). "
+                             f"Distance = 2 × ATR (${log.get('atr_used',0):.2f})",
+                    )
+                    tp_dist = log["tp_distance"]
+                    tp_dir  = f"-${tp_dist:.2f} below entry" if not is_long else f"+${tp_dist:.2f} above entry"
+                    c3.metric(
+                        "Take-Profit",
+                        f"${log['take_profit']:,.2f}",
+                        delta=tp_dir,
+                        delta_color="off",
+                        help=f"Exit with a profit if price reaches this level ({tp_dir}). "
+                             f"Distance = 3 × ATR (${log.get('atr_used',0):.2f})",
+                    )
+                    c4.metric(
+                        "Position Size",
+                        f"{log['position_size']} shares",
+                        help=f"Sized so a stop-out costs exactly ${log['dollar_risk']:,.0f} (1% of account). "
+                             f"Risk/Reward = 1:{log['risk_reward_ratio']}",
+                    )
+
+                    # Risk / reward row
+                    rr1, rr2, rr3 = st.columns(3)
+                    rr1.metric("$ at Risk",       f"${log['dollar_risk']:,.0f}",
+                               help="Max loss if Stop-Loss is hit (1% of $100k account)")
+                    rr2.metric("$ Potential Gain", f"${log['dollar_reward']:,.0f}",
+                               help="Profit if Take-Profit is reached")
+                    rr3.metric("Risk / Reward",    f"1 : {log['risk_reward_ratio']}",
+                               help="For every $1 risked, the target profit is $1.50")
+
+                    st.write("")
+
+                    # Confidence blend
+                    ml_c  = log.get("ml_confidence", 0)
+                    tc    = log.get("tech_conf_score", 0)
+                    bl_c  = log.get("blended_confidence", 0)
+                    sigs  = log.get("confirming_signals", "?")
+                    st.markdown(
+                        f"**Confidence breakdown** &nbsp;—&nbsp; "
+                        f"ML model: **{ml_c:.1%}** &nbsp;×&nbsp; 65% &nbsp;+&nbsp; "
+                        f"Technical confirmation: **{tc:.1%}** &nbsp;×&nbsp; 35% "
+                        f"&nbsp;=&nbsp; Blended: **{bl_c:.1%}** &nbsp;|&nbsp; "
+                        f"Indicators aligned: **{sigs}**"
+                    )
+                    st.progress(min(bl_c, 1.0), text=f"Blended confidence {bl_c:.1%} (threshold 50%)")
+
+                    # Signal breakdown
+                    detail = log.get("tech_signals", {})
+                    if detail:
+                        st.write("")
+                        st.markdown("**Technical signal breakdown:**")
+                        sig_cols = st.columns(len(detail))
+                        for col, (key, confirmed) in zip(sig_cols, detail.items()):
+                            label, tooltip = SIGNAL_LABELS.get(key, (key, ""))
+                            icon  = "✅" if confirmed else "❌"
+                            color = "#22c55e" if confirmed else "#ef4444"
+                            result_word = "Confirmed" if confirmed else "Not confirmed"
+                            col.markdown(
+                                f"<div style='text-align:center;padding:8px;border-radius:6px;"
+                                f"border:1px solid {color}20;background:{color}10'>"
+                                f"<div style='font-size:1.4em'>{icon}</div>"
+                                f"<div style='font-weight:bold;font-size:0.8em;margin-top:4px'>{label}</div>"
+                                f"<div style='color:{color};font-size:0.75em'>{result_word}</div>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                                help=tooltip,
+                            )
+
+                    st.write("")
+                    st.divider()
+
+            else:
+                st.info(
+                    "No active trades this run — all tickers were either flat, "
+                    "or the blended confidence was below the 50% threshold."
+                )
+                st.divider()
+
+            # ── Skipped trades table ─────────────────────────────────────────
+            st.markdown("#### Why Each Ticker Was Skipped")
+            st.caption(
+                "Tickers skipped for 'FLAT direction' never reached the blending stage — "
+                "the ML model itself couldn't pick a clear direction, so no trade is warranted."
+            )
+
+            REASON_LABELS = {
+                "direction_flat": "Model direction uncertain (FLAT) — ML couldn't pick UP or DOWN",
+            }
+
+            skip_rows = []
+            for log in skipped:
+                raw_reason = log.get("reason", "—")
+                direction  = log.get("direction", "flat").upper()
+                is_flat    = raw_reason == "direction_flat"
+
+                # Prettify reason string
+                if raw_reason in REASON_LABELS:
+                    pretty_reason = REASON_LABELS[raw_reason]
+                elif raw_reason.startswith("low_blended_confidence"):
+                    bl = log.get("blended_confidence", 0)
+                    pretty_reason = f"Blended confidence too low ({bl:.1%} < 50% threshold)"
+                else:
+                    pretty_reason = raw_reason
+
+                skip_rows.append({
+                    "Ticker":        log["ticker"],
+                    "ML Direction":  direction,
+                    "ML Confidence": f"{log.get('ml_confidence', log.get('confidence', 0)):.1%}",
+                    "Tech Score":    "N/A (skipped early)" if is_flat else f"{log.get('tech_conf_score', 0):.1%}",
+                    "Blended":       "N/A (skipped early)" if is_flat else f"{log.get('blended_confidence', 0):.1%}",
+                    "Signals":       "N/A" if is_flat else log.get("confirming_signals", "—"),
+                    "Skip Reason":   pretty_reason,
+                })
+            st.dataframe(pd.DataFrame(skip_rows), use_container_width=True, hide_index=True)
+
+            st.write("")
+            with st.expander("📖 How the execution engine works — plain English"):
+                st.markdown("""
+#### Step 1 — ML Direction check
+The model must predict either **UP** or **DOWN** with any confidence. If it outputs **FLAT**
+(too uncertain to call), the ticker is skipped immediately — no point blending indecision.
+
+#### Step 2 — Technical indicator confirmation (4 signals)
+Four independent chart signals are checked. Each one either agrees or disagrees with the
+ML direction. The fraction that agree becomes the **technical score** (0% = none agree, 100% = all agree).
+
+| Signal | What it checks |
+|---|---|
+| **Ichimoku T/K Cross** | Tenkan-sen (9-period midline) crossed above/below Kijun-sen (26-period), and price confirmed the move |
+| **Ichimoku Cloud** | Price is fully above both Senkou A & B (bullish) or fully below (bearish) — cloud acts as a support/resistance zone |
+| **ADX Trend Strength** | ADX > 20 means an actual trend exists (not just noise); +DI > −DI confirms it's an uptrend, and vice versa |
+| **BBW Volatility Gate** | Bollinger Band Width between 1%–12%: too narrow = price coiling with no breakout yet; too wide = panic/spike, unreliable signals |
+
+#### Step 3 — Confidence blending
+> **Blended = ML confidence × 0.65 + Technical score × 0.35**
+
+A strong ML signal with weak chart support gets modestly boosted or held back.
+A 52% ML signal with 3/4 indicators confirming → ~62% blended. Below 50% → skip.
+
+#### Step 4 — Position sizing (ATR-based)
+> **Shares = floor($1,000 risk ÷ Stop-Loss distance)**
+
+Stop-Loss distance = **2 × ATR** (the average daily price range).
+Take-Profit = **3 × ATR** above/below entry → always a **1.5:1 reward/risk ratio**.
+$1,000 = 1% of the $100,000 simulated account. Maximum loss per trade is always $1,000.
+""")
+
+
+    with tab5:
+        st.write("")
+        st.markdown("### 📈 Real-World Prediction Track Record")
+        st.caption(
+            "Every time the pipeline runs, predictions are saved with an expected outcome date. "
+            "When that date arrives, the next run fetches the actual closing price, applies the same "
+            "deadband thresholds used during training, and records whether the call was right or wrong. "
+            "This is the only accuracy that matters — not backtest accuracy, but live predictions."
+        )
+        st.write("")
+
+        if not pred_history:
+            st.info(
+                "No prediction history yet. Run the pipeline once to start recording. "
+                "Outcomes are resolved automatically on subsequent runs once each horizon passes."
+            )
+        else:
+            resolved  = [r for r in pred_history if r["status"] in ("correct", "incorrect")]
+            pending   = [r for r in pred_history if r["status"] == "pending"]
+
+            # ── Top-level accuracy metrics ────────────────────────────────
+            if resolved:
+                n_correct = sum(1 for r in resolved if r["status"] == "correct")
+                overall_acc = n_correct / len(resolved)
+
+                a1, a2, a3, a4 = st.columns(4)
+                a1.metric(
+                    "Overall Accuracy",
+                    f"{overall_acc:.1%}",
+                    help="Across all tickers and all horizons. Random baseline = 33%.",
+                )
+                a2.metric("Correct",   n_correct,    help="Predictions that matched the actual direction")
+                a3.metric("Incorrect", len(resolved) - n_correct)
+                a4.metric("Pending",   len(pending),  help="Horizon not yet reached — outcome unknown")
+
+                st.write("")
+
+                # ── Accuracy by horizon ───────────────────────────────────
+                st.markdown("#### Accuracy by Forecast Horizon")
+                st.caption("A random 3-class model scores 33%. Anything consistently above that has edge.")
+                horizon_rows = []
+                for h in [1, 3, 5, 10]:
+                    h_res = [r for r in resolved if r["horizon_days"] == h]
+                    if not h_res:
+                        continue
+                    h_correct = sum(1 for r in h_res if r["status"] == "correct")
+                    h_acc = h_correct / len(h_res)
+                    horizon_rows.append({
+                        "Horizon":   f"{h} day{'s' if h > 1 else ''}",
+                        "Evaluated": len(h_res),
+                        "Correct":   h_correct,
+                        "Accuracy":  f"{h_acc:.1%}",
+                        "vs Random": f"{(h_acc - 0.333):+.1%}",
+                    })
+                if horizon_rows:
+                    st.dataframe(
+                        pd.DataFrame(horizon_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                st.write("")
+
+                # ── Accuracy by ticker ────────────────────────────────────
+                st.markdown("#### Accuracy by Ticker")
+                ticker_rows = []
+                for t in sorted({r["ticker"] for r in resolved}):
+                    t_res     = [r for r in resolved if r["ticker"] == t]
+                    t_correct = sum(1 for r in t_res if r["status"] == "correct")
+                    t_acc     = t_correct / len(t_res)
+                    ticker_rows.append({
+                        "Ticker":    t,
+                        "Evaluated": len(t_res),
+                        "Correct":   t_correct,
+                        "Accuracy":  f"{t_acc:.1%}",
+                        "vs Random": f"{(t_acc - 0.333):+.1%}",
+                    })
+                st.dataframe(
+                    pd.DataFrame(ticker_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.write("")
+
+                # ── Recent resolved predictions ───────────────────────────
+                st.markdown("#### Recent Resolved Predictions")
+                recent = sorted(resolved, key=lambda r: r.get("predicted_at", ""), reverse=True)[:30]
+                rec_rows = []
+                for r in recent:
+                    pct = r.get("actual_pct_change")
+                    rec_rows.append({
+                        "Date":      r.get("predicted_at", "")[:10],
+                        "Ticker":    r["ticker"],
+                        "Horizon":   f"{r['horizon_days']}d",
+                        "Predicted": r["predicted_direction"].upper(),
+                        "Conf":      f"{r['predicted_confidence']:.1%}",
+                        "Actual":    r.get("actual_direction", "—").upper(),
+                        "Move %":    f"{pct:+.2f}%" if pct is not None else "—",
+                        "Result":    "✅ Correct" if r["status"] == "correct" else "❌ Wrong",
+                    })
+                st.dataframe(
+                    pd.DataFrame(rec_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            else:
+                st.info(
+                    f"**{len(pending)} prediction(s) pending.** "
+                    "No outcomes have resolved yet — the model needs at least one horizon "
+                    "to pass before accuracy can be measured. "
+                    "For 1-day predictions, run the pipeline again tomorrow."
+                )
+
+            # ── Pending predictions ───────────────────────────────────────
+            if pending:
+                st.write("")
+                with st.expander(f"⏳ {len(pending)} pending prediction(s) — awaiting outcome"):
+                    pend_rows = []
+                    for r in sorted(pending, key=lambda x: x.get("outcome_date", "")):
+                        pend_rows.append({
+                            "Ticker":         r["ticker"],
+                            "Horizon":        f"{r['horizon_days']}d",
+                            "Predicted":      r["predicted_direction"].upper(),
+                            "Confidence":     f"{r['predicted_confidence']:.1%}",
+                            "Entry Price":    f"${r['entry_price']:,.2f}" if r.get("entry_price") else "—",
+                            "Outcome Date":   r.get("outcome_date", "—"),
+                        })
+                    st.dataframe(
+                        pd.DataFrame(pend_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+            st.write("")
+            with st.expander("📖 How outcomes are resolved"):
+                st.markdown(f"""
+The pipeline uses the **same deadband thresholds** during outcome resolution as it does when
+creating training labels. This ensures the accuracy score is apples-to-apples with what the
+model was actually trained to predict.
+
+| Horizon | Deadband | Meaning |
+|---|---|---|
+| 1 day | ±0.3% | Move < 0.3% either way = FLAT |
+| 3 days | ±0.7% | Move < 0.7% = FLAT |
+| 5 days | ±1.0% | Move < 1.0% = FLAT |
+| 10 days | ±1.5% | Move < 1.5% = FLAT |
+
+**Outcome date** is calculated as the N-th business day after the prediction date,
+using pandas `bdate_range` (weekends excluded; note: no holiday calendar applied).
+
+**Why 33% is the random baseline** — the model predicts one of three classes (UP, FLAT, DOWN).
+A coin-flip model scores 33%. Any consistent reading above ~38–40% over many predictions
+suggests the model is finding a real signal.
 """)
 
     # ── Footer ────────────────────────────────────────────────────────────────

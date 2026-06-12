@@ -411,6 +411,149 @@ class StockForecasterPipeline:
             traceback.print_exc()
             return False
 
+    async def run_outcome_tracking(self) -> None:
+        """
+        Close-the-loop: record today's predictions and resolve old pending ones.
+
+        On each pipeline run this method:
+          1. Loads results/prediction_history.json (creates it on first run).
+          2. For every pending prediction whose outcome_date has passed, fetches
+             the actual closing price via yfinance, applies the same deadband
+             thresholds used during training, and marks the record correct/incorrect.
+          3. Appends new predictions from self.predictions (skips duplicates so
+             re-running on the same day doesn't double-count).
+          4. Saves the updated history back to disk.
+
+        This gives you a real-world accuracy signal that improves with every run.
+        """
+        from datetime import timezone, date, timedelta
+        import yfinance as yf
+
+        history_path = Path("./results/prediction_history.json")
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if history_path.exists():
+            try:
+                with open(history_path) as f:
+                    history: list = json.load(f)
+            except Exception:
+                history = []
+        else:
+            history = []
+
+        today = datetime.now(timezone.utc).date()
+
+        # ── Step 1: close out pending predictions ──────────────────────
+        closed_count = 0
+        for record in history:
+            if record.get("status") != "pending":
+                continue
+            try:
+                outcome_date = date.fromisoformat(record["outcome_date"])
+            except (KeyError, ValueError):
+                continue
+            if today <= outcome_date:
+                continue  # horizon not yet reached
+
+            ticker  = record["ticker"]
+            horizon = record["horizon_days"]
+            # settings.TARGET_DEADBAND stores values as %, e.g. 0.3 means 0.3%
+            db_pct  = settings.TARGET_DEADBAND.get(horizon, 0.5) / 100.0
+
+            try:
+                end_fetch = outcome_date + timedelta(days=7)
+                raw = yf.download(
+                    ticker,
+                    start=outcome_date.isoformat(),
+                    end=end_fetch.isoformat(),
+                    progress=False,
+                    auto_adjust=True,
+                )
+                if raw.empty:
+                    continue
+                if isinstance(raw.columns, pd.MultiIndex):
+                    raw.columns = raw.columns.get_level_values(0)
+                actual_price = float(raw["Close"].iloc[0])
+                entry_price  = record.get("entry_price")
+                if not entry_price:
+                    continue
+                pct_change = (actual_price - entry_price) / entry_price
+
+                if pct_change > db_pct:
+                    actual_dir = "up"
+                elif pct_change < -db_pct:
+                    actual_dir = "down"
+                else:
+                    actual_dir = "flat"
+
+                record["actual_price"]      = round(actual_price, 4)
+                record["actual_direction"]  = actual_dir
+                record["actual_pct_change"] = round(pct_change * 100, 3)
+                record["correct"]           = (actual_dir == record["predicted_direction"])
+                record["status"]            = "correct" if record["correct"] else "incorrect"
+                closed_count += 1
+            except Exception as exc:
+                logger.warning(f"Outcome tracking: could not resolve {ticker} {horizon}d — {exc}")
+
+        # ── Step 2: record new predictions from this run ───────────────
+        run_ts       = datetime.now(timezone.utc).isoformat()
+        existing_ids = {r["id"] for r in history}
+        new_count    = 0
+
+        for ticker, ticker_data in self.predictions.items():
+            stock_df = self.aggregated_data.get("stocks", {}).get(ticker)
+            if stock_df is not None and not stock_df.empty and "Close" in stock_df.columns:
+                entry_price = round(float(stock_df["Close"].iloc[-1]), 4)
+            else:
+                entry_price = None
+
+            for horizon_str, pred in ticker_data.get("horizons", {}).items():
+                horizon      = int(horizon_str)
+                outcome_date = pd.bdate_range(
+                    start=today + timedelta(days=1), periods=horizon
+                )[-1].date()
+                record_id = f"{ticker}_{today.isoformat()}_{horizon}d"
+                if record_id in existing_ids:
+                    continue
+
+                history.append({
+                    "id":                   record_id,
+                    "ticker":               ticker,
+                    "horizon_days":         horizon,
+                    "predicted_at":         run_ts,
+                    "predicted_direction":  pred["direction"],
+                    "predicted_confidence": round(pred["confidence"], 4),
+                    "entry_price":          entry_price,
+                    "outcome_date":         outcome_date.isoformat(),
+                    "actual_price":         None,
+                    "actual_direction":     None,
+                    "actual_pct_change":    None,
+                    "correct":              None,
+                    "status":               "pending",
+                })
+                new_count += 1
+
+        # ── Step 3: persist ────────────────────────────────────────────
+        with open(history_path, "w") as f:
+            json.dump(history, f, indent=2, default=str)
+        logger.info(f"Saved prediction history to {history_path}")
+
+        # ── Step 4: log accuracy summary ───────────────────────────────
+        resolved = [r for r in history if r["status"] in ("correct", "incorrect")]
+        if resolved:
+            n_correct = sum(1 for r in resolved if r["status"] == "correct")
+            acc = n_correct / len(resolved)
+            logger.info(
+                f"Outcome tracking: {n_correct}/{len(resolved)} correct "
+                f"({acc:.1%} real-world accuracy) | "
+                f"resolved {closed_count} | recorded {new_count} new"
+            )
+        else:
+            logger.info(
+                f"Outcome tracking: recorded {new_count} new prediction(s). "
+                f"No outcomes resolved yet — check back after the first horizon passes."
+            )
+
     def save_results(self, output_dir: str = "./results"):
         """
         Save pipeline results to JSON files for analysis and UI consumption.
@@ -540,6 +683,9 @@ class StockForecasterPipeline:
         # Stage 4: Execution simulation (non-fatal — pipeline continues on failure)
         if not await self.run_execution_stage():
             logger.warning("Execution stage failed — results saved without trade logs.")
+
+        # Stage 5: Outcome tracking — close out old predictions, record new ones
+        await self.run_outcome_tracking()
 
         # Save results
         self.save_results()

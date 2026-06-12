@@ -137,6 +137,22 @@ class MLPredictor:
                     (close - df["SMA_200"]) / (df["SMA_200"] + 1e-6) * 100
                 )
 
+            # ----------------------------------------------------------------
+            # Layer 3: pandas-ta indicators (Ichimoku, ADX, BBW)
+            # Runs after `ta` has already computed BB_upper/middle/lower and
+            # ATR_14, so TechnicalIndicatorEngine can reuse those columns.
+            # Wrapped in try/except so a missing pandas-ta install does not
+            # abort the existing 23-indicator pipeline.
+            # ----------------------------------------------------------------
+            try:
+                from feature_engine.tech_indicators import TechnicalIndicatorEngine
+                df = TechnicalIndicatorEngine().apply_all(df)
+            except Exception as _tic_exc:
+                logger.warning(
+                    f"TechnicalIndicatorEngine failed for {ticker} — "
+                    f"continuing without Ichimoku/ADX/BBW. Error: {_tic_exc}"
+                )
+
             n_ind = len([
                 c for c in df.columns
                 if c not in {"Open", "High", "Low", "Close", "Volume",
