@@ -26,7 +26,9 @@ class SentimentAnalyzer:
     def __init__(self, model_name: str = settings.SENTIMENT_MODEL):
         """
         Initialize the sentiment analyzer with FinBERT model.
-        
+        Model is loaded lazily on first use to avoid crashing when
+        no posts need to be analyzed.
+
         Args:
             model_name: HuggingFace model identifier
         """
@@ -34,22 +36,26 @@ class SentimentAnalyzer:
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         )
-        
-        logger.info(f"Loading {model_name} on device: {self.device}")
-        
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            model_name
-        ).to(self.device)
-        self.model.eval()  # Set to evaluation mode
-        
+        self.tokenizer = None
+        self.model = None
+
         # FinBERT label mapping (negative, neutral, positive)
         self.label_mapping = {
             0: "negative",
             1: "neutral",
             2: "positive"
         }
-        
+
+    def _ensure_model_loaded(self):
+        """Load the model and tokenizer if not already loaded."""
+        if self.model is not None:
+            return
+        logger.info(f"Loading {self.model_name} on device: {self.device}")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            self.model_name
+        ).to(self.device)
+        self.model.eval()
         logger.info("Sentiment analyzer initialized successfully")
     
     def _normalize_sentiment_score(
@@ -101,7 +107,8 @@ class SentimentAnalyzer:
                 "confidence": 0.0,
                 "error": "Invalid or empty text"
             }
-        
+
+        self._ensure_model_loaded()
         try:
             with torch.no_grad():  # Optimization: disable gradient computation
                 # Tokenize text
@@ -166,8 +173,9 @@ class SentimentAnalyzer:
         Returns:
             List of sentiment analysis results
         """
+        self._ensure_model_loaded()
         results = []
-        
+
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i + batch_size]
             

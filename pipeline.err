@@ -1,0 +1,308 @@
+2026-06-08 18:41:48,081 - __main__ - INFO - 
+============================================================
+2026-06-08 18:41:48,083 - __main__ - INFO - STARTING STOCK FORECASTER PIPELINE
+2026-06-08 18:41:48,085 - __main__ - INFO - Time: 2026-06-08 18:41:48.085293
+2026-06-08 18:41:48,087 - __main__ - INFO - ============================================================
+
+2026-06-08 18:41:48,089 - __main__ - INFO - Initializing Stock Forecaster Pipeline...
+2026-06-08 18:41:48,090 - __main__ - INFO - Loading sentiment analyzer (this may take a moment)...
+2026-06-08 18:41:48,092 - __main__ - INFO - Pipeline initialization complete
+2026-06-08 18:41:48,094 - __main__ - INFO - ============================================================
+2026-06-08 18:41:48,095 - __main__ - INFO - STAGE 1: DATA INGESTION
+2026-06-08 18:41:48,095 - __main__ - INFO - ============================================================
+2026-06-08 18:41:48,563 - ingestion.pipeline - INFO - Successfully fetched 500 rows for NVDA
+2026-06-08 18:41:48,567 - ingestion.pipeline - INFO - Successfully fetched 500 rows for GOOGL
+2026-06-08 18:41:48,569 - ingestion.pipeline - INFO - Successfully fetched 500 rows for TSLA
+2026-06-08 18:41:48,570 - ingestion.pipeline - INFO - Successfully fetched 500 rows for MSFT
+2026-06-08 18:41:48,625 - ingestion.pipeline - INFO - Successfully fetched 500 rows for AAPL
+2026-06-08 18:41:49,154 - ingestion.pipeline - INFO - Fetched 25 earnings dates for GOOGL
+2026-06-08 18:41:49,538 - ingestion.pipeline - INFO - Successfully fetched 501 rows for ^VIX
+2026-06-08 18:41:49,550 - ingestion.pipeline - INFO - Fetched 25 earnings dates for NVDA
+2026-06-08 18:41:49,554 - ingestion.pipeline - INFO - Fetched 25 earnings dates for TSLA
+2026-06-08 18:41:49,565 - ingestion.pipeline - INFO - Fetched 25 earnings dates for AAPL
+2026-06-08 18:41:49,576 - ingestion.pipeline - INFO - Fetched 25 earnings dates for MSFT
+2026-06-08 18:41:49,702 - ingestion.pipeline - INFO - Successfully fetched 500 rows for ^TNX
+2026-06-08 18:41:49,721 - ingestion.pipeline - INFO - Successfully fetched 500 rows for ^IRX
+2026-06-08 18:41:49,741 - ingestion.pipeline - INFO - Successfully fetched 500 rows for QQQ
+2026-06-08 18:41:49,751 - ingestion.pipeline - INFO - Successfully fetched 500 rows for XLY
+2026-06-08 18:41:49,791 - ingestion.pipeline - INFO - Successfully fetched 500 rows for XLK
+2026-06-08 18:41:50,804 - ingestion.pipeline - INFO - Fetched macro data for ^VIX: 501 rows
+2026-06-08 18:41:50,815 - ingestion.pipeline - INFO - Fetched macro data for ^TNX: 500 rows
+2026-06-08 18:41:50,815 - ingestion.pipeline - INFO - Fetched macro data for ^IRX: 500 rows
+2026-06-08 18:41:50,815 - ingestion.pipeline - INFO - Fetched macro data for QQQ: 500 rows
+2026-06-08 18:41:50,815 - ingestion.pipeline - INFO - Fetched macro data for XLK: 500 rows
+2026-06-08 18:41:50,816 - ingestion.pipeline - INFO - Fetched macro data for XLY: 500 rows
+2026-06-08 18:41:50,831 - ingestion.pipeline - WARNING - twikit library not installed
+2026-06-08 18:41:50,832 - ingestion.pipeline - WARNING - Could not initialize X client
+2026-06-08 18:41:50,832 - ingestion.pipeline - WARNING - twikit library not installed
+2026-06-08 18:41:50,832 - ingestion.pipeline - WARNING - Could not initialize X client
+2026-06-08 18:41:50,832 - ingestion.pipeline - WARNING - twikit library not installed
+2026-06-08 18:41:50,833 - ingestion.pipeline - WARNING - Could not initialize X client
+2026-06-08 18:41:50,833 - ingestion.pipeline - WARNING - twikit library not installed
+2026-06-08 18:41:50,833 - ingestion.pipeline - WARNING - Could not initialize X client
+2026-06-08 18:41:50,833 - ingestion.pipeline - WARNING - twikit library not installed
+2026-06-08 18:41:50,833 - ingestion.pipeline - WARNING - Could not initialize X client
+2026-06-08 18:41:51,001 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/wallstreetbets/search.json?q=AAPL&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,003 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/wallstreetbets/search.json?q=GOOGL&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,004 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/wallstreetbets/search.json?q=MSFT&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,005 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/wallstreetbets/search.json?q=TSLA&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,006 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/wallstreetbets/search.json?q=NVDA&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,029 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/wallstreetbets/search.json?q=TSLA&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,033 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/wallstreetbets/search.json?q=NVDA&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,036 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/wallstreetbets/search.json?q=AAPL&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,038 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/wallstreetbets/search.json?q=MSFT&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,039 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/wallstreetbets/search.json?q=GOOGL&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,117 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/stocks/search.json?q=GOOGL&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,122 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/stocks/search.json?q=AAPL&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,123 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/stocks/search.json?q=NVDA&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,124 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/stocks/search.json?q=TSLA&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,135 - httpx - INFO - HTTP Request: GET https://www.reddit.com/r/stocks/search.json?q=MSFT&sort=new&limit=50 "HTTP/1.1 403 Blocked"
+2026-06-08 18:41:51,141 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/stocks/search.json?q=AAPL&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,147 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/stocks/search.json?q=GOOGL&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,149 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/stocks/search.json?q=NVDA&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,151 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/stocks/search.json?q=TSLA&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,161 - ingestion.pipeline - ERROR - HTTP error fetching Reddit data: Client error '403 Blocked' for url 'https://www.reddit.com/r/stocks/search.json?q=MSFT&sort=new&limit=50'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+2026-06-08 18:41:51,162 - ingestion.pipeline - INFO - Aggregated data: 5 stocks, 6 macro series, 0 Reddit posts, 0 X posts
+2026-06-08 18:41:51,162 - __main__ - INFO - Ingestion complete. Aggregated data keys: dict_keys(['stocks', 'reddit', 'x', 'macro', 'earnings', 'timestamp'])
+2026-06-08 18:41:51,163 - __main__ - INFO - Cool-down: waiting 2 seconds...
+2026-06-08 18:41:53,163 - __main__ - INFO - ============================================================
+2026-06-08 18:41:53,175 - __main__ - INFO - STAGE 2: NLP SENTIMENT ANALYSIS
+2026-06-08 18:41:53,175 - __main__ - INFO - ============================================================
+2026-06-08 18:41:53,176 - __main__ - WARNING - No social media posts to analyze - skipping NLP, ML will use technical indicators only
+2026-06-08 18:41:53,176 - __main__ - INFO - Cool-down: waiting 2 seconds...
+2026-06-08 18:41:55,194 - __main__ - INFO - ============================================================
+2026-06-08 18:41:55,204 - __main__ - INFO - STAGE 3: ML FEATURE ENGINEERING & PREDICTION
+2026-06-08 18:41:55,204 - __main__ - INFO - ============================================================
+2026-06-08 18:41:55,205 - __main__ - INFO - 
+Processing ticker: AAPL
+2026-06-08 18:41:55,217 - ml_engine.predictor - INFO - Calculated 25 indicators for AAPL
+2026-06-08 18:41:55,245 - __main__ - INFO - Features ready for AAPL: shape (500, 40) | regimes: {'sideways': 322, 'bull': 125, 'bear': 53}
+2026-06-08 18:41:55,328 - ml_engine.predictor - INFO - Horizon 1d — Train 349, Val 75, Test 75 | features: 32 | class dist: {'down': 113, 'flat': 74, 'up': 162}
+2026-06-08 18:41:55,330 - __main__ - INFO - Horizon 1d — Train 349, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-05
+2026-06-08 18:42:37,508 - ml_engine.predictor - INFO - LOOCV horizon 1d — Acc 31.1% | F1 0.304 | n=289 folds
+2026-06-08 18:42:37,519 - ml_engine.predictor - INFO - Training ensemble for horizon 1d ...
+2026-06-08 18:42:37,578 - ml_engine.predictor - INFO -   Regime bull: 33 rows < 80 min, using fallback
+2026-06-08 18:42:37,578 - ml_engine.predictor - INFO -   Regime bear: 53 rows < 80 min, using fallback
+2026-06-08 18:42:37,623 - ml_engine.predictor - INFO -   Regime sideways (263 rows): val acc 0.387
+2026-06-08 18:42:37,626 - ml_engine.predictor - INFO - Horizon 1d — Val acc: 0.373 | Test acc: 0.320 | Regime rows: {'bull': 33, 'bear': 53, 'sideways': 263} | Regime models: ['sideways']
+2026-06-08 18:42:37,713 - ml_engine.predictor - INFO - Horizon 3d — Train 347, Val 75, Test 75 | features: 32 | class dist: {'down': 112, 'flat': 82, 'up': 153}
+2026-06-08 18:42:37,715 - __main__ - INFO - Horizon 3d — Train 347, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-03
+2026-06-08 18:43:17,955 - ml_engine.predictor - INFO - LOOCV horizon 3d — Acc 47.7% | F1 0.484 | n=287 folds
+2026-06-08 18:43:17,965 - ml_engine.predictor - INFO - Training ensemble for horizon 3d ...
+2026-06-08 18:43:18,029 - ml_engine.predictor - INFO -   Regime bull: 31 rows < 80 min, using fallback
+2026-06-08 18:43:18,031 - ml_engine.predictor - INFO -   Regime bear: 53 rows < 80 min, using fallback
+2026-06-08 18:43:18,080 - ml_engine.predictor - INFO -   Regime sideways (263 rows): val acc 0.427
+2026-06-08 18:43:18,083 - ml_engine.predictor - INFO - Horizon 3d — Val acc: 0.280 | Test acc: 0.200 | Regime rows: {'bull': 31, 'bear': 53, 'sideways': 263} | Regime models: ['sideways']
+2026-06-08 18:43:18,170 - ml_engine.predictor - INFO - Horizon 5d — Train 346, Val 74, Test 75 | features: 32 | class dist: {'down': 117, 'flat': 67, 'up': 162}
+2026-06-08 18:43:18,172 - __main__ - INFO - Horizon 5d — Train 346, Val 74, Test 75 | 2024-06-10 \u2192 2026-06-01
+2026-06-08 18:43:55,480 - ml_engine.predictor - INFO - LOOCV horizon 5d — Acc 60.1% | F1 0.606 | n=286 folds
+2026-06-08 18:43:55,490 - ml_engine.predictor - INFO - Training ensemble for horizon 5d ...
+2026-06-08 18:43:55,547 - ml_engine.predictor - INFO -   Regime bull: 30 rows < 80 min, using fallback
+2026-06-08 18:43:55,548 - ml_engine.predictor - INFO -   Regime bear: 53 rows < 80 min, using fallback
+2026-06-08 18:43:55,591 - ml_engine.predictor - INFO -   Regime sideways (263 rows): val acc 0.432
+2026-06-08 18:43:55,594 - ml_engine.predictor - INFO - Horizon 5d — Val acc: 0.230 | Test acc: 0.307 | Regime rows: {'bull': 30, 'bear': 53, 'sideways': 263} | Regime models: ['sideways']
+2026-06-08 18:43:55,682 - ml_engine.predictor - INFO - Horizon 10d — Train 343, Val 73, Test 74 | features: 32 | class dist: {'down': 103, 'flat': 78, 'up': 162}
+2026-06-08 18:43:55,685 - __main__ - INFO - Horizon 10d — Train 343, Val 73, Test 74 | 2024-06-10 \u2192 2026-05-22
+2026-06-08 18:44:30,458 - ml_engine.predictor - INFO - LOOCV horizon 10d — Acc 62.2% | F1 0.632 | n=283 folds
+2026-06-08 18:44:30,468 - ml_engine.predictor - INFO - Training ensemble for horizon 10d ...
+2026-06-08 18:44:30,540 - ml_engine.predictor - INFO -   Regime bull: 27 rows < 80 min, using fallback
+2026-06-08 18:44:30,543 - ml_engine.predictor - INFO -   Regime bear: 53 rows < 80 min, using fallback
+2026-06-08 18:44:30,597 - ml_engine.predictor - INFO -   Regime sideways (263 rows): val acc 0.274
+2026-06-08 18:44:30,600 - ml_engine.predictor - INFO - Horizon 10d — Val acc: 0.301 | Test acc: 0.176 | Regime rows: {'bull': 27, 'bear': 53, 'sideways': 263} | Regime models: ['sideways']
+2026-06-08 18:44:30,602 - __main__ - INFO - 
+\U0001f52e PREDICTIONS for AAPL:
+2026-06-08 18:44:30,602 - __main__ - INFO -     1 day(s): DOWN   conf 44.8%  [down 0.45 flat 0.24 up 0.31]  regime=bull
+2026-06-08 18:44:30,603 - __main__ - INFO -     3 day(s): DOWN   conf 47.2%  [down 0.47 flat 0.28 up 0.25]  regime=bull
+2026-06-08 18:44:30,603 - __main__ - INFO -     5 day(s): DOWN   conf 46.1%  [down 0.46 flat 0.19 up 0.35]  regime=bull
+2026-06-08 18:44:30,603 - __main__ - INFO -    10 day(s): DOWN   conf 59.4%  [down 0.59 flat 0.15 up 0.25]  regime=bull
+2026-06-08 18:44:30,603 - __main__ - INFO - 
+Processing ticker: NVDA
+2026-06-08 18:44:30,616 - ml_engine.predictor - INFO - Calculated 25 indicators for NVDA
+2026-06-08 18:44:30,638 - __main__ - INFO - Features ready for NVDA: shape (500, 40) | regimes: {'sideways': 305, 'bull': 170, 'bear': 25}
+2026-06-08 18:44:30,726 - ml_engine.predictor - INFO - Horizon 1d — Train 349, Val 75, Test 75 | features: 32 | class dist: {'down': 139, 'flat': 36, 'up': 174}
+2026-06-08 18:44:30,728 - __main__ - INFO - Horizon 1d — Train 349, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-05
+2026-06-08 18:45:10,015 - ml_engine.predictor - INFO - LOOCV horizon 1d — Acc 39.1% | F1 0.389 | n=289 folds
+2026-06-08 18:45:10,027 - ml_engine.predictor - INFO - Training ensemble for horizon 1d ...
+2026-06-08 18:45:10,091 - ml_engine.predictor - INFO -   Regime bull (80 rows): val acc 0.427
+2026-06-08 18:45:10,092 - ml_engine.predictor - INFO -   Regime bear: 25 rows < 80 min, using fallback
+2026-06-08 18:45:10,137 - ml_engine.predictor - INFO -   Regime sideways (244 rows): val acc 0.440
+2026-06-08 18:45:10,140 - ml_engine.predictor - INFO - Horizon 1d — Val acc: 0.440 | Test acc: 0.573 | Regime rows: {'bull': 80, 'bear': 25, 'sideways': 244} | Regime models: ['bull', 'sideways']
+2026-06-08 18:45:10,230 - ml_engine.predictor - INFO - Horizon 3d — Train 347, Val 75, Test 75 | features: 32 | class dist: {'down': 131, 'flat': 44, 'up': 172}
+2026-06-08 18:45:10,232 - __main__ - INFO - Horizon 3d — Train 347, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-03
+2026-06-08 18:45:47,417 - ml_engine.predictor - INFO - LOOCV horizon 3d — Acc 51.9% | F1 0.530 | n=287 folds
+2026-06-08 18:45:47,428 - ml_engine.predictor - INFO - Training ensemble for horizon 3d ...
+2026-06-08 18:45:47,497 - ml_engine.predictor - INFO -   Regime bull: 78 rows < 80 min, using fallback
+2026-06-08 18:45:47,499 - ml_engine.predictor - INFO -   Regime bear: 25 rows < 80 min, using fallback
+2026-06-08 18:45:47,542 - ml_engine.predictor - INFO -   Regime sideways (244 rows): val acc 0.360
+2026-06-08 18:45:47,546 - ml_engine.predictor - INFO - Horizon 3d — Val acc: 0.400 | Test acc: 0.400 | Regime rows: {'bull': 78, 'bear': 25, 'sideways': 244} | Regime models: ['sideways']
+2026-06-08 18:45:47,635 - ml_engine.predictor - INFO - Horizon 5d — Train 346, Val 74, Test 75 | features: 32 | class dist: {'down': 124, 'flat': 47, 'up': 175}
+2026-06-08 18:45:47,637 - __main__ - INFO - Horizon 5d — Train 346, Val 74, Test 75 | 2024-06-10 \u2192 2026-06-01
+2026-06-08 18:46:22,252 - ml_engine.predictor - INFO - LOOCV horizon 5d — Acc 62.9% | F1 0.631 | n=286 folds
+2026-06-08 18:46:22,263 - ml_engine.predictor - INFO - Training ensemble for horizon 5d ...
+2026-06-08 18:46:22,452 - ml_engine.predictor - INFO -   Regime bull: 77 rows < 80 min, using fallback
+2026-06-08 18:46:22,462 - ml_engine.predictor - INFO -   Regime bear: 25 rows < 80 min, using fallback
+2026-06-08 18:46:22,498 - ml_engine.predictor - INFO -   Regime sideways (244 rows): val acc 0.351
+2026-06-08 18:46:22,502 - ml_engine.predictor - INFO - Horizon 5d — Val acc: 0.473 | Test acc: 0.307 | Regime rows: {'bull': 77, 'bear': 25, 'sideways': 244} | Regime models: ['sideways']
+2026-06-08 18:46:22,590 - ml_engine.predictor - INFO - Horizon 10d — Train 343, Val 73, Test 74 | features: 32 | class dist: {'down': 116, 'flat': 45, 'up': 182}
+2026-06-08 18:46:22,593 - __main__ - INFO - Horizon 10d — Train 343, Val 73, Test 74 | 2024-06-10 \u2192 2026-05-22
+2026-06-08 18:47:00,105 - ml_engine.predictor - INFO - LOOCV horizon 10d — Acc 70.0% | F1 0.712 | n=283 folds
+2026-06-08 18:47:00,108 - ml_engine.predictor - INFO - Training ensemble for horizon 10d ...
+2026-06-08 18:47:00,373 - ml_engine.predictor - INFO -   Regime bull: 74 rows < 80 min, using fallback
+2026-06-08 18:47:00,375 - ml_engine.predictor - INFO -   Regime bear: 25 rows < 80 min, using fallback
+2026-06-08 18:47:00,476 - ml_engine.predictor - INFO -   Regime sideways (244 rows): val acc 0.329
+2026-06-08 18:47:00,484 - ml_engine.predictor - INFO - Horizon 10d — Val acc: 0.452 | Test acc: 0.446 | Regime rows: {'bull': 74, 'bear': 25, 'sideways': 244} | Regime models: ['sideways']
+2026-06-08 18:47:00,486 - __main__ - INFO - 
+\U0001f52e PREDICTIONS for NVDA:
+2026-06-08 18:47:00,487 - __main__ - INFO -     1 day(s): UP     conf 44.6%  [down 0.38 flat 0.18 up 0.45]  regime=bull
+2026-06-08 18:47:00,487 - __main__ - INFO -     3 day(s): DOWN   conf 43.7%  [down 0.44 flat 0.17 up 0.39]  regime=bull
+2026-06-08 18:47:00,488 - __main__ - INFO -     5 day(s): FLAT   conf 44.7%  [down 0.18 flat 0.45 up 0.38]  regime=bull
+2026-06-08 18:47:00,488 - __main__ - INFO -    10 day(s): UP     conf 65.2%  [down 0.24 flat 0.11 up 0.65]  regime=bull
+2026-06-08 18:47:00,488 - __main__ - INFO - 
+Processing ticker: TSLA
+2026-06-08 18:47:00,512 - ml_engine.predictor - INFO - Calculated 25 indicators for TSLA
+2026-06-08 18:47:00,555 - __main__ - INFO - Features ready for TSLA: shape (500, 40) | regimes: {'sideways': 401, 'bull': 73, 'bear': 26}
+2026-06-08 18:47:00,814 - ml_engine.predictor - INFO - Horizon 1d — Train 349, Val 75, Test 75 | features: 32 | class dist: {'down': 153, 'flat': 30, 'up': 166}
+2026-06-08 18:47:00,815 - __main__ - INFO - Horizon 1d — Train 349, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-05
+2026-06-08 18:48:00,256 - ml_engine.predictor - INFO - LOOCV horizon 1d — Acc 41.2% | F1 0.405 | n=289 folds
+2026-06-08 18:48:00,257 - ml_engine.predictor - INFO - Training ensemble for horizon 1d ...
+2026-06-08 18:48:00,374 - ml_engine.predictor - INFO -   Regime bull: 37 rows < 80 min, using fallback
+2026-06-08 18:48:00,386 - ml_engine.predictor - INFO -   Regime bear: 12 rows < 80 min, using fallback
+2026-06-08 18:48:00,469 - ml_engine.predictor - INFO -   Regime sideways (300 rows): val acc 0.427
+2026-06-08 18:48:00,478 - ml_engine.predictor - INFO - Horizon 1d — Val acc: 0.427 | Test acc: 0.547 | Regime rows: {'bull': 37, 'bear': 12, 'sideways': 300} | Regime models: ['sideways']
+2026-06-08 18:48:00,695 - ml_engine.predictor - INFO - Horizon 3d — Train 347, Val 75, Test 75 | features: 32 | class dist: {'down': 150, 'flat': 30, 'up': 167}
+2026-06-08 18:48:00,696 - __main__ - INFO - Horizon 3d — Train 347, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-03
+2026-06-08 18:48:51,942 - ml_engine.predictor - INFO - LOOCV horizon 3d — Acc 54.7% | F1 0.557 | n=287 folds
+2026-06-08 18:48:51,953 - ml_engine.predictor - INFO - Training ensemble for horizon 3d ...
+2026-06-08 18:48:52,009 - ml_engine.predictor - INFO -   Regime bull: 35 rows < 80 min, using fallback
+2026-06-08 18:48:52,010 - ml_engine.predictor - INFO -   Regime bear: 12 rows < 80 min, using fallback
+2026-06-08 18:48:52,056 - ml_engine.predictor - INFO -   Regime sideways (300 rows): val acc 0.507
+2026-06-08 18:48:52,063 - ml_engine.predictor - INFO - Horizon 3d — Val acc: 0.453 | Test acc: 0.400 | Regime rows: {'bull': 35, 'bear': 12, 'sideways': 300} | Regime models: ['sideways']
+2026-06-08 18:48:52,162 - ml_engine.predictor - INFO - Horizon 5d — Train 346, Val 74, Test 75 | features: 32 | class dist: {'down': 149, 'flat': 31, 'up': 166}
+2026-06-08 18:48:52,165 - __main__ - INFO - Horizon 5d — Train 346, Val 74, Test 75 | 2024-06-10 \u2192 2026-06-01
+2026-06-08 18:49:26,600 - ml_engine.predictor - INFO - LOOCV horizon 5d — Acc 54.2% | F1 0.538 | n=286 folds
+2026-06-08 18:49:26,611 - ml_engine.predictor - INFO - Training ensemble for horizon 5d ...
+2026-06-08 18:49:26,660 - ml_engine.predictor - INFO -   Regime bull: 34 rows < 80 min, using fallback
+2026-06-08 18:49:26,660 - ml_engine.predictor - INFO -   Regime bear: 12 rows < 80 min, using fallback
+2026-06-08 18:49:26,704 - ml_engine.predictor - INFO -   Regime sideways (300 rows): val acc 0.486
+2026-06-08 18:49:26,708 - ml_engine.predictor - INFO - Horizon 5d — Val acc: 0.459 | Test acc: 0.307 | Regime rows: {'bull': 34, 'bear': 12, 'sideways': 300} | Regime models: ['sideways']
+2026-06-08 18:49:26,800 - ml_engine.predictor - INFO - Horizon 10d — Train 343, Val 73, Test 74 | features: 32 | class dist: {'down': 126, 'flat': 34, 'up': 183}
+2026-06-08 18:49:26,802 - __main__ - INFO - Horizon 10d — Train 343, Val 73, Test 74 | 2024-06-10 \u2192 2026-05-22
+2026-06-08 18:49:58,629 - ml_engine.predictor - INFO - LOOCV horizon 10d — Acc 65.0% | F1 0.663 | n=283 folds
+2026-06-08 18:49:58,630 - ml_engine.predictor - INFO - Training ensemble for horizon 10d ...
+2026-06-08 18:49:58,699 - ml_engine.predictor - INFO -   Regime bull: 31 rows < 80 min, using fallback
+2026-06-08 18:49:58,699 - ml_engine.predictor - INFO -   Regime bear: 12 rows < 80 min, using fallback
+2026-06-08 18:49:58,758 - ml_engine.predictor - INFO -   Regime sideways (300 rows): val acc 0.507
+2026-06-08 18:49:58,761 - ml_engine.predictor - INFO - Horizon 10d — Val acc: 0.425 | Test acc: 0.365 | Regime rows: {'bull': 31, 'bear': 12, 'sideways': 300} | Regime models: ['sideways']
+2026-06-08 18:49:58,763 - __main__ - INFO - 
+\U0001f52e PREDICTIONS for TSLA:
+2026-06-08 18:49:58,763 - __main__ - INFO -     1 day(s): DOWN   conf 45.3%  [down 0.45 flat 0.10 up 0.44]  regime=sideways
+2026-06-08 18:49:58,763 - __main__ - INFO -     3 day(s): UP     conf 58.7%  [down 0.26 flat 0.15 up 0.59]  regime=sideways
+2026-06-08 18:49:58,764 - __main__ - INFO -     5 day(s): UP     conf 60.8%  [down 0.31 flat 0.09 up 0.61]  regime=sideways
+2026-06-08 18:49:58,764 - __main__ - INFO -    10 day(s): UP     conf 52.7%  [down 0.30 flat 0.17 up 0.53]  regime=sideways
+2026-06-08 18:49:58,764 - __main__ - INFO - 
+Processing ticker: GOOGL
+2026-06-08 18:49:58,777 - ml_engine.predictor - INFO - Calculated 25 indicators for GOOGL
+2026-06-08 18:49:58,800 - __main__ - INFO - Features ready for GOOGL: shape (500, 40) | regimes: {'sideways': 296, 'bull': 182, 'bear': 22}
+2026-06-08 18:49:58,897 - ml_engine.predictor - INFO - Horizon 1d — Train 349, Val 75, Test 75 | features: 32 | class dist: {'down': 131, 'flat': 48, 'up': 170}
+2026-06-08 18:49:58,897 - __main__ - INFO - Horizon 1d — Train 349, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-05
+2026-06-08 18:50:42,094 - ml_engine.predictor - INFO - LOOCV horizon 1d — Acc 37.4% | F1 0.383 | n=289 folds
+2026-06-08 18:50:42,104 - ml_engine.predictor - INFO - Training ensemble for horizon 1d ...
+2026-06-08 18:50:42,169 - ml_engine.predictor - INFO -   Regime bull: 70 rows < 80 min, using fallback
+2026-06-08 18:50:42,170 - ml_engine.predictor - INFO -   Regime bear: 22 rows < 80 min, using fallback
+2026-06-08 18:50:42,216 - ml_engine.predictor - INFO -   Regime sideways (257 rows): val acc 0.387
+2026-06-08 18:50:42,220 - ml_engine.predictor - INFO - Horizon 1d — Val acc: 0.387 | Test acc: 0.307 | Regime rows: {'bull': 70, 'bear': 22, 'sideways': 257} | Regime models: ['sideways']
+2026-06-08 18:50:42,311 - ml_engine.predictor - INFO - Horizon 3d — Train 347, Val 75, Test 75 | features: 32 | class dist: {'down': 116, 'flat': 61, 'up': 170}
+2026-06-08 18:50:42,314 - __main__ - INFO - Horizon 3d — Train 347, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-03
+2026-06-08 18:51:21,942 - ml_engine.predictor - INFO - LOOCV horizon 3d — Acc 54.7% | F1 0.543 | n=287 folds
+2026-06-08 18:51:21,946 - ml_engine.predictor - INFO - Training ensemble for horizon 3d ...
+2026-06-08 18:51:22,019 - ml_engine.predictor - INFO -   Regime bull: 68 rows < 80 min, using fallback
+2026-06-08 18:51:22,022 - ml_engine.predictor - INFO -   Regime bear: 22 rows < 80 min, using fallback
+2026-06-08 18:51:22,064 - ml_engine.predictor - INFO -   Regime sideways (257 rows): val acc 0.333
+2026-06-08 18:51:22,068 - ml_engine.predictor - INFO - Horizon 3d — Val acc: 0.387 | Test acc: 0.387 | Regime rows: {'bull': 68, 'bear': 22, 'sideways': 257} | Regime models: ['sideways']
+2026-06-08 18:51:22,160 - ml_engine.predictor - INFO - Horizon 5d — Train 346, Val 74, Test 75 | features: 32 | class dist: {'down': 115, 'flat': 60, 'up': 171}
+2026-06-08 18:51:22,162 - __main__ - INFO - Horizon 5d — Train 346, Val 74, Test 75 | 2024-06-10 \u2192 2026-06-01
+2026-06-08 18:52:00,617 - ml_engine.predictor - INFO - LOOCV horizon 5d — Acc 59.4% | F1 0.598 | n=286 folds
+2026-06-08 18:52:00,627 - ml_engine.predictor - INFO - Training ensemble for horizon 5d ...
+2026-06-08 18:52:00,683 - ml_engine.predictor - INFO -   Regime bull: 67 rows < 80 min, using fallback
+2026-06-08 18:52:00,684 - ml_engine.predictor - INFO -   Regime bear: 22 rows < 80 min, using fallback
+2026-06-08 18:52:00,751 - ml_engine.predictor - INFO -   Regime sideways (257 rows): val acc 0.324
+2026-06-08 18:52:00,756 - ml_engine.predictor - INFO - Horizon 5d — Val acc: 0.419 | Test acc: 0.320 | Regime rows: {'bull': 67, 'bear': 22, 'sideways': 257} | Regime models: ['sideways']
+2026-06-08 18:52:00,848 - ml_engine.predictor - INFO - Horizon 10d — Train 343, Val 73, Test 74 | features: 32 | class dist: {'down': 107, 'flat': 55, 'up': 181}
+2026-06-08 18:52:00,850 - __main__ - INFO - Horizon 10d — Train 343, Val 73, Test 74 | 2024-06-10 \u2192 2026-05-22
+2026-06-08 18:52:35,924 - ml_engine.predictor - INFO - LOOCV horizon 10d — Acc 67.1% | F1 0.679 | n=283 folds
+2026-06-08 18:52:35,934 - ml_engine.predictor - INFO - Training ensemble for horizon 10d ...
+2026-06-08 18:52:36,017 - ml_engine.predictor - INFO -   Regime bull: 64 rows < 80 min, using fallback
+2026-06-08 18:52:36,019 - ml_engine.predictor - INFO -   Regime bear: 22 rows < 80 min, using fallback
+2026-06-08 18:52:36,069 - ml_engine.predictor - INFO -   Regime sideways (257 rows): val acc 0.260
+2026-06-08 18:52:36,073 - ml_engine.predictor - INFO - Horizon 10d — Val acc: 0.521 | Test acc: 0.392 | Regime rows: {'bull': 64, 'bear': 22, 'sideways': 257} | Regime models: ['sideways']
+2026-06-08 18:52:36,074 - __main__ - INFO - 
+\U0001f52e PREDICTIONS for GOOGL:
+2026-06-08 18:52:36,075 - __main__ - INFO -     1 day(s): DOWN   conf 53.2%  [down 0.53 flat 0.18 up 0.29]  regime=bull
+2026-06-08 18:52:36,075 - __main__ - INFO -     3 day(s): DOWN   conf 53.8%  [down 0.54 flat 0.16 up 0.31]  regime=bull
+2026-06-08 18:52:36,075 - __main__ - INFO -     5 day(s): DOWN   conf 64.1%  [down 0.64 flat 0.10 up 0.26]  regime=bull
+2026-06-08 18:52:36,075 - __main__ - INFO -    10 day(s): DOWN   conf 56.6%  [down 0.57 flat 0.14 up 0.30]  regime=bull
+2026-06-08 18:52:36,075 - __main__ - INFO - 
+Processing ticker: MSFT
+2026-06-08 18:52:36,088 - ml_engine.predictor - INFO - Calculated 25 indicators for MSFT
+2026-06-08 18:52:36,110 - __main__ - INFO - Features ready for MSFT: shape (500, 40) | regimes: {'sideways': 342, 'bull': 84, 'bear': 74}
+2026-06-08 18:52:36,196 - ml_engine.predictor - INFO - Horizon 1d — Train 349, Val 75, Test 75 | features: 32 | class dist: {'down': 121, 'flat': 84, 'up': 144}
+2026-06-08 18:52:36,199 - __main__ - INFO - Horizon 1d — Train 349, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-05
+2026-06-08 18:53:21,313 - ml_engine.predictor - INFO - LOOCV horizon 1d — Acc 32.9% | F1 0.324 | n=289 folds
+2026-06-08 18:53:21,314 - ml_engine.predictor - INFO - Training ensemble for horizon 1d ...
+2026-06-08 18:53:21,410 - ml_engine.predictor - INFO -   Regime bull (80 rows): val acc 0.387
+2026-06-08 18:53:21,410 - ml_engine.predictor - INFO -   Regime bear: 20 rows < 80 min, using fallback
+2026-06-08 18:53:21,456 - ml_engine.predictor - INFO -   Regime sideways (249 rows): val acc 0.387
+2026-06-08 18:53:21,459 - ml_engine.predictor - INFO - Horizon 1d — Val acc: 0.373 | Test acc: 0.387 | Regime rows: {'bull': 80, 'bear': 20, 'sideways': 249} | Regime models: ['bull', 'sideways']
+2026-06-08 18:53:21,558 - ml_engine.predictor - INFO - Horizon 3d — Train 347, Val 75, Test 75 | features: 32 | class dist: {'down': 98, 'flat': 96, 'up': 153}
+2026-06-08 18:53:21,561 - __main__ - INFO - Horizon 3d — Train 347, Val 75, Test 75 | 2024-06-10 \u2192 2026-06-03
+2026-06-08 18:54:03,183 - ml_engine.predictor - INFO - LOOCV horizon 3d — Acc 43.6% | F1 0.440 | n=287 folds
+2026-06-08 18:54:03,192 - ml_engine.predictor - INFO - Training ensemble for horizon 3d ...
+2026-06-08 18:54:03,295 - ml_engine.predictor - INFO -   Regime bull: 78 rows < 80 min, using fallback
+2026-06-08 18:54:03,298 - ml_engine.predictor - INFO -   Regime bear: 20 rows < 80 min, using fallback
+2026-06-08 18:54:03,340 - ml_engine.predictor - INFO -   Regime sideways (249 rows): val acc 0.253
+2026-06-08 18:54:03,343 - ml_engine.predictor - INFO - Horizon 3d — Val acc: 0.533 | Test acc: 0.387 | Regime rows: {'bull': 78, 'bear': 20, 'sideways': 249} | Regime models: ['sideways']
+2026-06-08 18:54:03,433 - ml_engine.predictor - INFO - Horizon 5d — Train 346, Val 74, Test 75 | features: 32 | class dist: {'down': 108, 'flat': 91, 'up': 147}
+2026-06-08 18:54:03,435 - __main__ - INFO - Horizon 5d — Train 346, Val 74, Test 75 | 2024-06-10 \u2192 2026-06-01
+2026-06-08 18:54:41,808 - ml_engine.predictor - INFO - LOOCV horizon 5d — Acc 55.9% | F1 0.562 | n=286 folds
+2026-06-08 18:54:41,808 - ml_engine.predictor - INFO - Training ensemble for horizon 5d ...
+2026-06-08 18:54:41,916 - ml_engine.predictor - INFO -   Regime bull: 77 rows < 80 min, using fallback
+2026-06-08 18:54:41,919 - ml_engine.predictor - INFO -   Regime bear: 20 rows < 80 min, using fallback
+2026-06-08 18:54:41,962 - ml_engine.predictor - INFO -   Regime sideways (249 rows): val acc 0.230
+2026-06-08 18:54:41,966 - ml_engine.predictor - INFO - Horizon 5d — Val acc: 0.473 | Test acc: 0.480 | Regime rows: {'bull': 77, 'bear': 20, 'sideways': 249} | Regime models: ['sideways']
+2026-06-08 18:54:42,058 - ml_engine.predictor - INFO - Horizon 10d — Train 343, Val 73, Test 74 | features: 32 | class dist: {'down': 110, 'flat': 83, 'up': 150}
+2026-06-08 18:54:42,060 - __main__ - INFO - Horizon 10d — Train 343, Val 73, Test 74 | 2024-06-10 \u2192 2026-05-22
+2026-06-08 18:55:21,850 - ml_engine.predictor - INFO - LOOCV horizon 10d — Acc 60.8% | F1 0.609 | n=283 folds
+2026-06-08 18:55:21,851 - ml_engine.predictor - INFO - Training ensemble for horizon 10d ...
+2026-06-08 18:55:21,906 - ml_engine.predictor - INFO -   Regime bull: 74 rows < 80 min, using fallback
+2026-06-08 18:55:21,906 - ml_engine.predictor - INFO -   Regime bear: 20 rows < 80 min, using fallback
+2026-06-08 18:55:21,952 - ml_engine.predictor - INFO -   Regime sideways (249 rows): val acc 0.096
+2026-06-08 18:55:21,957 - ml_engine.predictor - INFO - Horizon 10d — Val acc: 0.192 | Test acc: 0.446 | Regime rows: {'bull': 74, 'bear': 20, 'sideways': 249} | Regime models: ['sideways']
+2026-06-08 18:55:21,958 - __main__ - INFO - 
+\U0001f52e PREDICTIONS for MSFT:
+2026-06-08 18:55:21,959 - __main__ - INFO -     1 day(s): FLAT   conf 46.4%  [down 0.16 flat 0.46 up 0.37]  regime=sideways
+2026-06-08 18:55:21,959 - __main__ - INFO -     3 day(s): UP     conf 41.7%  [down 0.18 flat 0.40 up 0.42]  regime=sideways
+2026-06-08 18:55:21,959 - __main__ - INFO -     5 day(s): UP     conf 58.4%  [down 0.15 flat 0.26 up 0.58]  regime=sideways
+2026-06-08 18:55:21,959 - __main__ - INFO -    10 day(s): UP     conf 70.4%  [down 0.19 flat 0.11 up 0.70]  regime=sideways
+2026-06-08 18:55:21,959 - __main__ - INFO - 
+ML stage complete
+2026-06-08 18:55:21,962 - __main__ - INFO - Saved predictions to results\predictions.json
+2026-06-08 18:55:21,962 - __main__ - INFO - Saved feature importance to results\feature_importance.json
+2026-06-08 18:55:21,964 - __main__ - INFO - Saved model metrics to results\model_metrics.json
+2026-06-08 18:55:21,964 - __main__ - INFO - All results saved to ./results/
+2026-06-08 18:55:21,964 - __main__ - INFO - 
+============================================================
+2026-06-08 18:55:21,965 - __main__ - INFO - \u2705 PIPELINE EXECUTION COMPLETE
+2026-06-08 18:55:21,965 - __main__ - INFO - Time: 2026-06-08 18:55:21.965317
+2026-06-08 18:55:21,965 - __main__ - INFO - ============================================================
+2026-06-08 18:55:21,965 - __main__ - INFO - Cleaning up resources...
+2026-06-08 18:55:21,966 - __main__ - INFO - Cleanup complete
