@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     ACCOUNT_SIZE:      float = 100_000.0  # Simulated account equity ($)
     MIN_TRADE_CONFIDENCE: float = 0.50    # Applied to blended (ML + technical) confidence
 
+    # Reddit .json scraping settings (no API key required)
+    REDDIT_SUBREDDITS: list = ["wallstreetbets", "stocks"]
+    REDDIT_FETCH_COMMENTS: bool = True    # append top comment bodies to post text
+    REDDIT_COMMENT_LIMIT: int = 10        # max comments to fetch per post
+
     # Rate limiting
     REDDIT_DELAY: float = 2.0
     X_DELAY: float = 3.0

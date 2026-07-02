@@ -19,8 +19,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 import pandas as pd
-import praw
+
+try:
+    import praw as _praw
+except ImportError:
+    _praw = None
 
 logger = logging.getLogger(__name__)
 
@@ -61,27 +66,40 @@ class RedditSocialStream:
         df = stream.fetch_submissions("AAPL", subreddit="wallstreetbets")
     """
 
+    # Browser headers used by the HTTP .json fallback path
+    _HTTP_HEADERS: dict = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
     def __init__(
         self,
-        client_id: str,
-        client_secret: str,
-        user_agent: str,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> None:
         """
         Args:
-            client_id:     Reddit API script app client ID.
-            client_secret: Reddit API script app client secret.
-            user_agent:    Descriptive string per Reddit API rules:
-                           "AppName/Version by u/username"
+            client_id:     Reddit API script app client ID (optional).
+            client_secret: Reddit API script app client secret (optional).
+            user_agent:    Descriptive UA string per Reddit API rules (optional).
+
+        When credentials are omitted or praw is unavailable, fetch_submissions
+        automatically falls back to Reddit's public .json API — no setup needed.
         """
-        # read_only=True — no user login needed for public subreddits
-        self._reddit = praw.Reddit(
-            client_id=client_id,
-            client_secret=client_secret,
-            user_agent=user_agent,
-            ratelimit_seconds=60,   # praw auto-sleeps on 429
-        )
-        self._reddit.read_only = True
+        self._reddit = None
+        if _praw and client_id and client_secret:
+            self._reddit = _praw.Reddit(
+                client_id=client_id,
+                client_secret=client_secret,
+                user_agent=user_agent or "StockForecaster/1.0",
+                ratelimit_seconds=60,
+            )
+            self._reddit.read_only = True
 
     # ------------------------------------------------------------------
     # Public API
@@ -114,11 +132,15 @@ class RedditSocialStream:
         empty = pd.DataFrame(columns=SOCIAL_COLUMNS)
 
         try:
-            sub    = self._reddit.subreddit(subreddit)
-            search = sub.search(query=ticker, sort=sort, limit=limit)
-            raw_rows = self._parse_submissions(search, ticker)
+            if self._reddit:
+                sub = self._reddit.subreddit(subreddit)
+                raw_rows = self._parse_submissions(
+                    sub.search(query=ticker, sort=sort, limit=limit), ticker
+                )
+            else:
+                raw_rows = self._fetch_submissions_http(ticker, subreddit, limit)
         except Exception as exc:
-            logger.error(f"PRAW fetch failed for {ticker} in r/{subreddit}: {exc}")
+            logger.error(f"Reddit fetch failed for {ticker} in r/{subreddit}: {exc}")
             return empty
 
         if not raw_rows:
@@ -126,11 +148,54 @@ class RedditSocialStream:
             return empty
 
         hourly = self._aggregate_to_hourly(raw_rows)
+        method = "PRAW" if self._reddit else "HTTP .json"
         logger.info(
-            f"PRAW: {len(raw_rows)} submissions → {len(hourly)} hourly buckets "
+            f"{method}: {len(raw_rows)} submissions → {len(hourly)} hourly buckets "
             f"for {ticker} in r/{subreddit}"
         )
         return hourly
+
+    def _fetch_submissions_http(
+        self,
+        ticker: str,
+        subreddit: str,
+        limit: int,
+    ) -> list[dict]:
+        """Fetch submissions via Reddit's public .json API — no credentials needed."""
+        url = f"https://www.reddit.com/r/{subreddit}/search.json"
+        params = {"q": ticker, "sort": "new", "limit": limit, "restrict_sr": "on"}
+        try:
+            with httpx.Client(
+                headers=self._HTTP_HEADERS, timeout=15, follow_redirects=True
+            ) as client:
+                resp = client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            logger.warning(f"HTTP .json fetch failed for {ticker} in r/{subreddit}: {exc}")
+            return []
+
+        ticker_upper = ticker.upper()
+        raw_rows = []
+        for item in data.get("data", {}).get("children", []):
+            if item.get("kind") != "t3":
+                continue
+            d = item["data"]
+            combined = f"{d.get('title', '')} {d.get('selftext', '')}"
+            words = combined.upper().split()
+            mentions = words.count(ticker_upper) + words.count(f"${ticker_upper}")
+            if mentions == 0:
+                continue
+            try:
+                ts = datetime.fromtimestamp(float(d.get("created_utc", 0)), tz=timezone.utc)
+            except (ValueError, OSError):
+                continue
+            raw_rows.append({
+                "timestamp": ts,
+                "polarity": self._keyword_polarity(combined),
+                "mention_count": mentions,
+            })
+        return raw_rows
 
     # ------------------------------------------------------------------
     # Internal helpers

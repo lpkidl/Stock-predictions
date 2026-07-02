@@ -49,7 +49,13 @@ class DataIngestionPipeline:
         """Async context manager entry."""
         self.session = httpx.AsyncClient(
             timeout=settings.REDDIT_REQUEST_TIMEOUT,
-            headers={"User-Agent": settings.REDDIT_USER_AGENT}
+            headers={
+                "User-Agent": settings.REDDIT_USER_AGENT,
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+            },
+            follow_redirects=True,
         )
         return self
     
@@ -132,18 +138,22 @@ class DataIngestionPipeline:
         if settings.PRAW_CLIENT_ID and settings.PRAW_CLIENT_SECRET:
             return await self._fetch_reddit_via_praw(ticker, limit)
 
-        # ── Legacy raw-HTTP path ─────────────────────────────────────────
+        # ── Free .json path (no API key required) ───────────────────────
         if not self.session:
             logger.error("HTTP session not initialized")
             return []
 
         posts = []
-        subreddits = ["wallstreetbets", "stocks"]
 
-        for subreddit in subreddits:
+        for subreddit in settings.REDDIT_SUBREDDITS:
             try:
                 url = f"https://www.reddit.com/r/{subreddit}/search.json"
-                params = {"q": ticker, "sort": "new", "limit": limit}
+                params = {
+                    "q": ticker,
+                    "sort": "new",
+                    "limit": limit,
+                    "restrict_sr": "on",  # keep results within this subreddit
+                }
 
                 response = await self.session.get(url, params=params)
                 response.raise_for_status()
@@ -157,6 +167,7 @@ class DataIngestionPipeline:
                                 "source": "reddit",
                                 "subreddit": subreddit,
                                 "ticker": ticker,
+                                "post_id": post_data.get("id", ""),
                                 "title": post_data.get("title", ""),
                                 "text": post_data.get("selftext", ""),
                                 "score": post_data.get("score", 0),
@@ -177,17 +188,55 @@ class DataIngestionPipeline:
                     await asyncio.sleep(60)
                 elif e.response.status_code == 403:
                     logger.warning(
-                        "Reddit raw JSON API returned 403. "
-                        "Set PRAW_CLIENT_ID + PRAW_CLIENT_SECRET in .env to use the "
-                        "official Reddit API and restore social data collection."
+                        f"Reddit .json returned 403 for r/{subreddit}. "
+                        "The subreddit may be private or require authentication."
                     )
-                    break
                 else:
                     logger.error(f"HTTP error fetching Reddit data: {str(e)}")
             except Exception as e:
                 logger.error(f"Error fetching Reddit posts for {ticker}: {str(e)}")
 
+        # Optionally enrich top posts with comment text for deeper sentiment signal
+        if settings.REDDIT_FETCH_COMMENTS and posts:
+            top_posts = sorted(posts, key=lambda p: p.get("score", 0), reverse=True)[:5]
+            for post in top_posts:
+                if post.get("post_id") and post.get("subreddit"):
+                    comments_text = await self._fetch_post_comments(
+                        post["post_id"], post["subreddit"], settings.REDDIT_COMMENT_LIMIT
+                    )
+                    if comments_text:
+                        post["text"] = (post["text"] + " " + comments_text).strip()
+                    await asyncio.sleep(settings.REDDIT_DELAY)
+
         return posts
+
+    async def _fetch_post_comments(
+        self,
+        post_id: str,
+        subreddit: str,
+        limit: int,
+    ) -> str:
+        """Fetch top comments for a post and return them as a single text string."""
+        url = f"https://www.reddit.com/r/{subreddit}/comments/{post_id}.json"
+        params = {"limit": limit, "depth": 1, "sort": "top"}
+        try:
+            response = await self.session.get(url, params=params)
+            if response.status_code != 200:
+                return ""
+            data = response.json()
+            # data[1] holds the comment listing
+            if not (isinstance(data, list) and len(data) > 1):
+                return ""
+            bodies = []
+            for item in data[1].get("data", {}).get("children", []):
+                if item.get("kind") == "t1":
+                    body = item.get("data", {}).get("body", "")
+                    if body and body not in ("[deleted]", "[removed]"):
+                        bodies.append(body)
+            return " ".join(bodies)
+        except Exception as e:
+            logger.debug(f"Comment fetch failed for post {post_id}: {e}")
+            return ""
 
     async def _fetch_reddit_via_praw(
         self,
@@ -206,13 +255,14 @@ class DataIngestionPipeline:
                     user_agent=settings.PRAW_USER_AGENT,
                 )
                 posts_out = []
-                for sub_name in ["wallstreetbets", "stocks"]:
+                for sub_name in settings.REDDIT_SUBREDDITS:
                     sub = reddit.subreddit(sub_name)
                     for submission in sub.search(ticker, sort="new", limit=limit):
                         posts_out.append({
                             "source": "reddit",
                             "subreddit": sub_name,
                             "ticker": ticker,
+                            "post_id": submission.id,
                             "title": submission.title or "",
                             "text": submission.selftext or "",
                             "score": submission.score,
@@ -437,41 +487,37 @@ class DataIngestionPipeline:
             logger.debug("ALPHA_VANTAGE_API_KEY not set — skipping Alpha Vantage intraday.")
 
         # ----------------------------------------------------------------
-        # Optional Layer 1-B: PRAW Reddit social stream
-        # Only runs when PRAW_CLIENT_ID + PRAW_CLIENT_SECRET are set in .env.
-        # Dispatched via run_in_executor because praw is a synchronous library.
-        # Stores hourly-resampled social-volume DataFrames per ticker.
+        # Layer 1-B: Reddit social stream (hourly volume + polarity buckets)
+        # Uses PRAW when credentials are set; falls back to the free .json
+        # API automatically — no credentials required for the HTTP path.
         # ----------------------------------------------------------------
         aggregated_data["reddit_social"] = {}
-        if settings.PRAW_CLIENT_ID and settings.PRAW_CLIENT_SECRET:
-            try:
-                from feature_engine.reddit_stream import RedditSocialStream
-                praw_stream = RedditSocialStream(
-                    client_id=settings.PRAW_CLIENT_ID,
-                    client_secret=settings.PRAW_CLIENT_SECRET,
-                    user_agent=settings.PRAW_USER_AGENT,
+        try:
+            from feature_engine.reddit_stream import RedditSocialStream
+            reddit_stream = RedditSocialStream(
+                client_id=settings.PRAW_CLIENT_ID,
+                client_secret=settings.PRAW_CLIENT_SECRET,
+                user_agent=settings.PRAW_USER_AGENT,
+            )
+            loop = asyncio.get_event_loop()
+            reddit_tasks = [
+                loop.run_in_executor(
+                    self.executor,
+                    lambda t=t: reddit_stream.fetch_submissions(t)
                 )
-                loop = asyncio.get_event_loop()
-                praw_tasks = [
-                    loop.run_in_executor(
-                        self.executor,
-                        lambda t=t: praw_stream.fetch_submissions(t)
-                    )
-                    for t in self.tickers
-                ]
-                praw_results = await asyncio.gather(*praw_tasks, return_exceptions=True)
-                for ticker, result in zip(self.tickers, praw_results):
-                    if isinstance(result, Exception):
-                        logger.warning(f"PRAW fetch failed for {ticker}: {result}")
-                    elif result is not None and not result.empty:
-                        aggregated_data["reddit_social"][ticker] = result
-                        logger.info(f"PRAW social: stored {len(result)} hourly buckets for {ticker}")
-            except ImportError:
-                logger.warning("feature_engine not importable — skipping PRAW step.")
-            except Exception as exc:
-                logger.error(f"PRAW social block failed: {exc}")
-        else:
-            logger.debug("PRAW credentials not set — skipping PRAW social stream.")
+                for t in self.tickers
+            ]
+            reddit_results = await asyncio.gather(*reddit_tasks, return_exceptions=True)
+            for ticker, result in zip(self.tickers, reddit_results):
+                if isinstance(result, Exception):
+                    logger.warning(f"Reddit social fetch failed for {ticker}: {result}")
+                elif result is not None and not result.empty:
+                    aggregated_data["reddit_social"][ticker] = result
+                    logger.info(f"Reddit social: stored {len(result)} hourly buckets for {ticker}")
+        except ImportError:
+            logger.warning("feature_engine not importable — skipping Reddit social stream.")
+        except Exception as exc:
+            logger.error(f"Reddit social block failed: {exc}")
 
         logger.info(
             f"Aggregated data: {len(aggregated_data['stocks'])} stocks, "
