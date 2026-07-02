@@ -360,6 +360,48 @@ class MLPredictor:
             logger.error(f"Error merging feature data for {ticker}: {e}")
             return pd.DataFrame()
 
+    def merge_news_features(
+        self, stock_df: pd.DataFrame, news_df: pd.DataFrame, ticker: str
+    ) -> pd.DataFrame:
+        """
+        Left-join LLM-scored news features into stock_df on date.
+
+        news_df contains one row per ticker per run date with columns:
+          news_sentiment, news_confidence, news_risk_score, news_catalyst_score
+
+        Historical rows that predate news collection get 0-filled — XGBoost
+        treats 0 as "no news signal" which is correct for out-of-sample dates.
+        The non-numeric news_themes column is dropped before merging.
+        """
+        if news_df is None or news_df.empty:
+            return stock_df
+        try:
+            df = stock_df.copy()
+            if "date" not in df.columns:
+                df["date"] = pd.to_datetime(df.index)
+            df["date"] = pd.to_datetime(df["date"])
+
+            news_cols = [
+                "date", "news_sentiment", "news_confidence",
+                "news_risk_score", "news_catalyst_score",
+            ]
+            filtered = news_df[news_df["ticker"] == ticker][news_cols].copy()
+            filtered["date"] = pd.to_datetime(filtered["date"])
+
+            merged = df.merge(filtered, on="date", how="left")
+            for col in ("news_sentiment", "news_confidence",
+                        "news_risk_score", "news_catalyst_score"):
+                merged[col] = merged[col].ffill().fillna(0.0)
+
+            logger.info(
+                f"Merged news features for {ticker}: "
+                f"{filtered.shape[0]} news date(s) into {merged.shape}"
+            )
+            return merged
+        except Exception as exc:
+            logger.warning(f"Could not merge news features for {ticker}: {exc}")
+            return stock_df
+
     # ------------------------------------------------------------------
     # Target & feature helpers
     # ------------------------------------------------------------------

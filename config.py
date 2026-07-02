@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     # Alpha Vantage API (Layer 1 — dual data ingestion)
     ALPHA_VANTAGE_API_KEY: Optional[str] = None   # set in .env: ALPHA_VANTAGE_API_KEY=...
 
+    # News sentiment (Layer 2-B — LLM-scored financial news)
+    # Free keys: newsapi.org/register  |  console.groq.com
+    NEWSAPI_KEY:  Optional[str] = None
+    GROQ_API_KEY: Optional[str] = None
+    NEWS_LOOKBACK_DAYS: int = 7    # days of articles to pull per ticker
+    NEWS_MAX_ARTICLES:  int = 10   # max articles sent to LLM per ticker
+
     # PRAW / Reddit OAuth credentials (Layer 1 — social stream via praw library)
     # Create a "script" app at https://www.reddit.com/prefs/apps, then set in .env:
     PRAW_CLIENT_ID:     Optional[str] = None

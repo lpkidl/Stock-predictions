@@ -24,6 +24,7 @@ from nlp.sentiment import SentimentAnalyzer
 from ml_engine.predictor import MLPredictor
 from ml_engine.walk_forward import WalkForwardBacktester
 from performance.tracker import PerformanceTracker
+from feature_engine.news_sentiment import NewsAnalyzer
 
 # Setup logging
 logging.basicConfig(
@@ -49,6 +50,7 @@ class StockForecasterPipeline:
         self.aggregated_data: Dict = {}
         self.sentiment_results: list = []
         self.sentiment_index: pd.DataFrame = None
+        self.news_scores: pd.DataFrame = None   # populated by run_news_stage()
         self.predictions: Dict = {}
         self.feature_importance: Dict = {}
         self.model_metrics: Dict = {}
@@ -143,7 +145,59 @@ class StockForecasterPipeline:
         except Exception as e:
             logger.error(f"Error in NLP stage: {str(e)}")
             return False
-    
+
+    async def run_news_stage(self) -> bool:
+        """
+        Stage 2-B: LLM-Scored News Sentiment (optional).
+
+        Fetches recent news articles for each ticker from NewsAPI and scores
+        them with Groq / Llama 3.3 70B.  The resulting numerical features
+        (news_sentiment, news_confidence, news_risk_score, news_catalyst_score)
+        are merged into the stock feature matrix in run_ml_stage().
+
+        Skipped silently when NEWSAPI_KEY or GROQ_API_KEY are not set in .env.
+        """
+        if not settings.NEWSAPI_KEY or not settings.GROQ_API_KEY:
+            logger.info(
+                "NEWSAPI_KEY or GROQ_API_KEY not set — skipping LLM news stage. "
+                "Add both keys to .env to enable financial news analysis."
+            )
+            return True
+
+        try:
+            logger.info("=" * 60)
+            logger.info("STAGE 2-B: LLM NEWS SENTIMENT (Groq / Llama 3.3)")
+            logger.info("=" * 60)
+
+            analyzer = NewsAnalyzer(
+                newsapi_key=settings.NEWSAPI_KEY,
+                groq_api_key=settings.GROQ_API_KEY,
+                lookback_days=settings.NEWS_LOOKBACK_DAYS,
+                max_articles=settings.NEWS_MAX_ARTICLES,
+            )
+
+            tickers = settings.STOCK_TICKERS.split(",")
+            self.news_scores = analyzer.analyze_tickers(tickers)
+
+            if not self.news_scores.empty:
+                logger.info(
+                    f"News stage complete — scored {len(self.news_scores)} ticker(s):\n"
+                    + self.news_scores[
+                        ["ticker", "news_sentiment", "news_confidence",
+                         "news_risk_score", "news_catalyst_score", "news_themes"]
+                    ].to_string(index=False)
+                )
+            else:
+                logger.warning("News stage: no scores returned for any ticker")
+
+            return True
+
+        except Exception as exc:
+            logger.error(f"Error in news stage: {exc}")
+            import traceback
+            traceback.print_exc()
+            return True  # non-fatal — ML stage continues without news features
+
     async def run_ml_stage(self) -> bool:
         """
         Stage 3: ML Feature Engineering & Prediction
@@ -184,13 +238,19 @@ class StockForecasterPipeline:
                 # Regime labels for per-regime model training
                 stock_data = self.ml_predictor.detect_regime(stock_data)
 
-                # Merge sentiment if available
+                # Merge social-media sentiment if available
                 if self.sentiment_index is not None:
                     merged_data = self.ml_predictor.merge_feature_data(
                         stock_data, self.sentiment_index, ticker
                     )
                 else:
                     merged_data = stock_data
+
+                # Merge LLM-scored news features if available
+                if self.news_scores is not None and not self.news_scores.empty:
+                    merged_data = self.ml_predictor.merge_news_features(
+                        merged_data, self.news_scores, ticker
+                    )
 
                 if merged_data.empty:
                     logger.warning(f"Merged data is empty for {ticker}")
@@ -670,6 +730,9 @@ class StockForecasterPipeline:
         # Stage 2: NLP (optional - ML stage continues even without sentiment data)
         if not await self.run_nlp_stage():
             logger.warning("NLP stage failed - ML will run with technical indicators only")
+
+        # Stage 2-B: LLM news sentiment (optional — skipped if API keys not set)
+        await self.run_news_stage()
 
         # Cool-down between stages
         logger.info("Cool-down: waiting 2 seconds...")
