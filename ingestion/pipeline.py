@@ -114,38 +114,44 @@ class DataIngestionPipeline:
     ) -> List[Dict]:
         """
         Fetch posts from Reddit r/wallstreetbets and r/stocks.
-        Uses custom User-Agent to avoid 429 rate limit errors.
-        
+
+        Uses PRAW (official Reddit API) when PRAW_CLIENT_ID and
+        PRAW_CLIENT_SECRET are configured in .env.  Falls back to a
+        lightweight httpx scrape otherwise; if Reddit returns 403 (which
+        happens when the raw JSON API is blocked) the method returns an
+        empty list so the pipeline continues without social data.
+
         Args:
             ticker: Stock ticker to search for
             limit: Number of posts to retrieve
-            
+
         Returns:
             List of post dictionaries containing text and metadata
         """
+        # ── PRAW path (preferred when credentials are set) ───────────────
+        if settings.PRAW_CLIENT_ID and settings.PRAW_CLIENT_SECRET:
+            return await self._fetch_reddit_via_praw(ticker, limit)
+
+        # ── Legacy raw-HTTP path ─────────────────────────────────────────
         if not self.session:
             logger.error("HTTP session not initialized")
             return []
-        
+
         posts = []
         subreddits = ["wallstreetbets", "stocks"]
-        
+
         for subreddit in subreddits:
             try:
                 url = f"https://www.reddit.com/r/{subreddit}/search.json"
-                params = {
-                    "q": ticker,
-                    "sort": "new",
-                    "limit": limit
-                }
-                
+                params = {"q": ticker, "sort": "new", "limit": limit}
+
                 response = await self.session.get(url, params=params)
                 response.raise_for_status()
-                
+
                 data = response.json()
                 if "data" in data and "children" in data["data"]:
                     for post in data["data"]["children"]:
-                        if post["kind"] == "t3":  # t3 is a link post
+                        if post["kind"] == "t3":
                             post_data = post["data"]
                             posts.append({
                                 "source": "reddit",
@@ -159,160 +165,164 @@ class DataIngestionPipeline:
                                 ),
                                 "url": f"https://reddit.com{post_data.get('permalink', '')}"
                             })
-                
+
                 logger.info(
-                    f"Fetched {len(posts)} posts for {ticker} "
-                    f"from r/{subreddit}"
+                    f"Fetched {len(posts)} posts for {ticker} from r/{subreddit}"
                 )
                 await asyncio.sleep(settings.REDDIT_DELAY)
-                
+
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
-                    logger.warning(
-                        f"Rate limited by Reddit. "
-                        f"Waiting before retry..."
-                    )
+                    logger.warning("Rate limited by Reddit — waiting 60s before retry")
                     await asyncio.sleep(60)
-                else:
-                    logger.error(
-                        f"HTTP error fetching Reddit data: {str(e)}"
+                elif e.response.status_code == 403:
+                    logger.warning(
+                        "Reddit raw JSON API returned 403. "
+                        "Set PRAW_CLIENT_ID + PRAW_CLIENT_SECRET in .env to use the "
+                        "official Reddit API and restore social data collection."
                     )
+                    break
+                else:
+                    logger.error(f"HTTP error fetching Reddit data: {str(e)}")
             except Exception as e:
-                logger.error(
-                    f"Error fetching Reddit posts for {ticker}: {str(e)}"
-                )
-        
+                logger.error(f"Error fetching Reddit posts for {ticker}: {str(e)}")
+
         return posts
+
+    async def _fetch_reddit_via_praw(
+        self,
+        ticker: str,
+        limit: int,
+    ) -> List[Dict]:
+        """Fetch Reddit posts using the official PRAW library."""
+        try:
+            import praw as _praw
+            loop = asyncio.get_event_loop()
+
+            def _sync_fetch():
+                reddit = _praw.Reddit(
+                    client_id=settings.PRAW_CLIENT_ID,
+                    client_secret=settings.PRAW_CLIENT_SECRET,
+                    user_agent=settings.PRAW_USER_AGENT,
+                )
+                posts_out = []
+                for sub_name in ["wallstreetbets", "stocks"]:
+                    sub = reddit.subreddit(sub_name)
+                    for submission in sub.search(ticker, sort="new", limit=limit):
+                        posts_out.append({
+                            "source": "reddit",
+                            "subreddit": sub_name,
+                            "ticker": ticker,
+                            "title": submission.title or "",
+                            "text": submission.selftext or "",
+                            "score": submission.score,
+                            "timestamp": datetime.fromtimestamp(submission.created_utc),
+                            "url": f"https://reddit.com{submission.permalink}",
+                        })
+                return posts_out
+
+            posts = await loop.run_in_executor(self.executor, _sync_fetch)
+            logger.info(f"PRAW fetched {len(posts)} posts for {ticker}")
+            await asyncio.sleep(settings.REDDIT_DELAY)
+            return posts
+
+        except Exception as e:
+            logger.warning(f"PRAW fetch failed for {ticker}: {e}")
+            return []
     
     async def initialize_twikit_client(self) -> bool:
         """
         Initialize X/Twitter client with session caching.
-        Loads cached session if available; otherwise authenticates
-        and caches the session.
-        
+        Loads a saved cookie file if available; otherwise authenticates
+        using X_USERNAME / X_PASSWORD / X_EMAIL from .env and saves cookies.
+
         Returns:
             True if initialization successful, False otherwise
         """
         if not Client:
             logger.warning("twikit library not installed")
             return False
-        
+
+        if not all([settings.X_USERNAME, settings.X_PASSWORD, settings.X_EMAIL]):
+            logger.info("X/Twitter credentials not configured in .env — skipping X data")
+            return False
+
         try:
             self.twikit_client = Client()
-            
-            # Try to load cached session
-            if self._load_twikit_session():
-                logger.info("Loaded cached X/Twitter session")
+
+            # Try to restore a saved cookie session first
+            cookie_path = settings.X_SESSION_CACHE_PATH + ".json"
+            try:
+                self.twikit_client.load_cookies(cookie_path)
+                logger.info("Loaded cached X/Twitter cookies")
                 return True
-            
-            # Authenticate if no cache
-            if not all([
-                settings.X_USERNAME,
-                settings.X_PASSWORD,
-                settings.X_EMAIL
-            ]):
-                logger.warning(
-                    "X/Twitter credentials not configured in .env"
-                )
-                return False
-            
-            # Authenticate
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self.executor,
-                lambda: self.twikit_client.login(
-                    auth_info_1=settings.X_USERNAME,
-                    auth_info_2=settings.X_EMAIL,
-                    password=settings.X_PASSWORD
-                )
+            except Exception:
+                pass  # No cache or stale cache — fall through to fresh login
+
+            # Full login
+            await self.twikit_client.login(
+                auth_info_1=settings.X_USERNAME,
+                auth_info_2=settings.X_EMAIL,
+                password=settings.X_PASSWORD,
             )
-            
-            # Cache session
-            self._save_twikit_session()
-            logger.info("Successfully authenticated with X/Twitter")
+            self.twikit_client.save_cookies(cookie_path)
+            logger.info("Successfully authenticated with X/Twitter and saved cookies")
             return True
-            
+
         except Exception as e:
-            logger.error(f"Error initializing twikit client: {str(e)}")
+            logger.warning(f"X/Twitter init failed: {e} — X data will be skipped")
+            self.twikit_client = None
             return False
-    
-    def _load_twikit_session(self) -> bool:
-        """Load cached twikit session from file."""
-        try:
-            with open(settings.X_SESSION_CACHE_PATH, "r") as f:
-                session_data = json.load(f)
-                # Apply cached session data if twikit supports it
-                logger.debug("Session cache found")
-                return True
-        except FileNotFoundError:
-            return False
-        except Exception as e:
-            logger.warning(f"Error loading twikit session cache: {str(e)}")
-            return False
-    
-    def _save_twikit_session(self):
-        """Save twikit session to cache file."""
-        try:
-            with open(settings.X_SESSION_CACHE_PATH, "w") as f:
-                # Save session data (placeholder)
-                json.dump({"cached_at": datetime.now().isoformat()}, f)
-            logger.debug("Session cache saved")
-        except Exception as e:
-            logger.warning(f"Error saving twikit session cache: {str(e)}")
-    
+
     async def fetch_x_posts(
         self,
         ticker: str,
         limit: int = 20
     ) -> List[Dict]:
         """
-        Fetch posts from X (Twitter) using twikit library asynchronously.
-        Uses session caching to avoid repeated authentication.
-        
+        Fetch posts from X (Twitter) using twikit (fully async).
+        Uses saved cookie cache to avoid re-authentication on every run.
+
         Args:
             ticker: Stock ticker/keyword to search for
             limit: Number of posts to retrieve
-            
+
         Returns:
             List of post dictionaries containing text and metadata
         """
         posts = []
-        
+
         if not self.twikit_client:
             if not await self.initialize_twikit_client():
-                logger.warning("Could not initialize X client")
                 return posts
-        
+
         try:
-            loop = asyncio.get_event_loop()
-            
-            # Search for tweets (run in executor to not block)
-            search_results = await loop.run_in_executor(
-                self.executor,
-                lambda: self.twikit_client.search_tweet(
-                    query=f"${ticker}",
-                    count=limit
-                )
+            search_results = await self.twikit_client.search_tweet(
+                query=f"${ticker} lang:en",
+                product="Latest",
+                count=limit,
             )
-            
-            if hasattr(search_results, "__iter__"):
-                for tweet in search_results:
-                    posts.append({
-                        "source": "x",
-                        "ticker": ticker,
-                        "text": getattr(tweet, "text", ""),
-                        "author": getattr(tweet, "user", {}).get("name", ""),
-                        "likes": getattr(tweet, "favorite_count", 0),
-                        "timestamp": datetime.now(),
-                        "url": f"https://x.com/{getattr(tweet, 'user', {}).get('screen_name', '')}/status/{getattr(tweet, 'id', '')}"
-                    })
-            
+
+            for tweet in search_results:
+                user = getattr(tweet, "user", None)
+                screen_name = getattr(user, "screen_name", "") if user else ""
+                tweet_id    = getattr(tweet, "id", "")
+                posts.append({
+                    "source":    "x",
+                    "ticker":    ticker,
+                    "text":      getattr(tweet, "full_text", getattr(tweet, "text", "")),
+                    "author":    getattr(user, "name", "") if user else "",
+                    "likes":     getattr(tweet, "favorite_count", 0),
+                    "timestamp": datetime.now(),
+                    "url":       f"https://x.com/{screen_name}/status/{tweet_id}",
+                })
+
             logger.info(f"Fetched {len(posts)} posts for {ticker} from X")
             await asyncio.sleep(settings.X_DELAY)
-            
+
         except Exception as e:
-            logger.warning(f"Error fetching X posts for {ticker}: {str(e)}")
-        
+            logger.warning(f"Error fetching X posts for {ticker}: {e}")
+
         return posts
     
     async def fetch_macro_data(self) -> Dict[str, Optional[pd.DataFrame]]:

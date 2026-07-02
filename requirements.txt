@@ -33,9 +33,11 @@ pytz>=2023.3.post1
 # Scheduler
 apscheduler>=3.10.0
 
-# feature_engine — Layer 1-4 additions
-# praw: PRAW Reddit API wrapper (read-only social stream)
+# Optional social data sources
+# praw: official Reddit API (replaces broken raw HTTP scraper)
 praw>=7.7.1
+# twikit: X/Twitter scraper (requires free X account credentials in .env)
+twikit>=2.3.0
 # pandas-ta: optional accelerator for TechnicalIndicatorEngine.
 # All indicators (Ichimoku, ATR, ADX, BBW) are implemented in pure pandas/numpy
 # and work without this package.  Install only if pandas-ta supports your Python
