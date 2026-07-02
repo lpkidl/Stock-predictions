@@ -398,6 +398,71 @@ class DataIngestionPipeline:
         aggregated_data["reddit"] = [p for posts in reddit_results for p in posts]
         aggregated_data["x"]      = [p for posts in x_results      for p in posts]
 
+        # ----------------------------------------------------------------
+        # Optional Layer 1-A: Alpha Vantage intraday OHLCV
+        # Only runs when ALPHA_VANTAGE_API_KEY is set in .env.
+        # Stores 60-min OHLCV DataFrames (UTC-indexed) per ticker.
+        # ----------------------------------------------------------------
+        aggregated_data["intraday_ohlcv"] = {}
+        if settings.ALPHA_VANTAGE_API_KEY:
+            try:
+                from feature_engine.alpha_vantage import AlphaVantageClient
+                async with AlphaVantageClient(settings.ALPHA_VANTAGE_API_KEY) as av_client:
+                    av_tasks = [
+                        av_client.fetch_intraday_ohlcv(t, interval="60min")
+                        for t in self.tickers
+                    ]
+                    av_results = await asyncio.gather(*av_tasks, return_exceptions=True)
+                    for ticker, result in zip(self.tickers, av_results):
+                        if isinstance(result, Exception):
+                            logger.warning(f"AV intraday fetch failed for {ticker}: {result}")
+                        elif result is not None and not result.empty:
+                            aggregated_data["intraday_ohlcv"][ticker] = result
+                            logger.info(f"AV intraday: stored {len(result)} bars for {ticker}")
+            except ImportError:
+                logger.warning("feature_engine not importable — skipping Alpha Vantage step.")
+            except Exception as exc:
+                logger.error(f"Alpha Vantage intraday block failed: {exc}")
+        else:
+            logger.debug("ALPHA_VANTAGE_API_KEY not set — skipping Alpha Vantage intraday.")
+
+        # ----------------------------------------------------------------
+        # Optional Layer 1-B: PRAW Reddit social stream
+        # Only runs when PRAW_CLIENT_ID + PRAW_CLIENT_SECRET are set in .env.
+        # Dispatched via run_in_executor because praw is a synchronous library.
+        # Stores hourly-resampled social-volume DataFrames per ticker.
+        # ----------------------------------------------------------------
+        aggregated_data["reddit_social"] = {}
+        if settings.PRAW_CLIENT_ID and settings.PRAW_CLIENT_SECRET:
+            try:
+                from feature_engine.reddit_stream import RedditSocialStream
+                praw_stream = RedditSocialStream(
+                    client_id=settings.PRAW_CLIENT_ID,
+                    client_secret=settings.PRAW_CLIENT_SECRET,
+                    user_agent=settings.PRAW_USER_AGENT,
+                )
+                loop = asyncio.get_event_loop()
+                praw_tasks = [
+                    loop.run_in_executor(
+                        self.executor,
+                        lambda t=t: praw_stream.fetch_submissions(t)
+                    )
+                    for t in self.tickers
+                ]
+                praw_results = await asyncio.gather(*praw_tasks, return_exceptions=True)
+                for ticker, result in zip(self.tickers, praw_results):
+                    if isinstance(result, Exception):
+                        logger.warning(f"PRAW fetch failed for {ticker}: {result}")
+                    elif result is not None and not result.empty:
+                        aggregated_data["reddit_social"][ticker] = result
+                        logger.info(f"PRAW social: stored {len(result)} hourly buckets for {ticker}")
+            except ImportError:
+                logger.warning("feature_engine not importable — skipping PRAW step.")
+            except Exception as exc:
+                logger.error(f"PRAW social block failed: {exc}")
+        else:
+            logger.debug("PRAW credentials not set — skipping PRAW social stream.")
+
         logger.info(
             f"Aggregated data: {len(aggregated_data['stocks'])} stocks, "
             f"{len(aggregated_data['macro'])} macro series, "
