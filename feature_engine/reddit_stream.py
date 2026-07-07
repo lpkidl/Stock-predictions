@@ -161,40 +161,47 @@ class RedditSocialStream:
         subreddit: str,
         limit: int,
     ) -> list[dict]:
-        """Fetch submissions via Reddit's public .json API — no credentials needed."""
-        url = f"https://www.reddit.com/r/{subreddit}/search.json"
-        params = {"q": ticker, "sort": "new", "limit": limit, "restrict_sr": "on"}
-        try:
-            with httpx.Client(
-                headers=self._HTTP_HEADERS, timeout=15, follow_redirects=True
-            ) as client:
-                resp = client.get(url, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception as exc:
-            logger.warning(f"HTTP .json fetch failed for {ticker} in r/{subreddit}: {exc}")
-            return []
-
+        """
+        Fetch submissions via Reddit's public .json feed — no credentials needed.
+        Uses /new.json and /hot.json (the search endpoint requires OAuth).
+        Filters results client-side for posts that mention the ticker.
+        """
         ticker_upper = ticker.upper()
         raw_rows = []
-        for item in data.get("data", {}).get("children", []):
-            if item.get("kind") != "t3":
-                continue
-            d = item["data"]
-            combined = f"{d.get('title', '')} {d.get('selftext', '')}"
-            words = combined.upper().split()
-            mentions = words.count(ticker_upper) + words.count(f"${ticker_upper}")
-            if mentions == 0:
-                continue
+
+        for feed in ("new", "hot"):
+            url = f"https://www.reddit.com/r/{subreddit}/{feed}.json"
+            params = {"limit": 100}
             try:
-                ts = datetime.fromtimestamp(float(d.get("created_utc", 0)), tz=timezone.utc)
-            except (ValueError, OSError):
+                with httpx.Client(
+                    headers=self._HTTP_HEADERS, timeout=15, follow_redirects=True
+                ) as client:
+                    resp = client.get(url, params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+            except Exception as exc:
+                logger.warning(f"HTTP .json fetch failed for r/{subreddit}/{feed}.json: {exc}")
                 continue
-            raw_rows.append({
-                "timestamp": ts,
-                "polarity": self._keyword_polarity(combined),
-                "mention_count": mentions,
-            })
+
+            for item in data.get("data", {}).get("children", []):
+                if item.get("kind") != "t3":
+                    continue
+                d = item["data"]
+                combined = f"{d.get('title', '')} {d.get('selftext', '')}"
+                words = combined.upper().split()
+                mentions = words.count(ticker_upper) + words.count(f"${ticker_upper}")
+                if mentions == 0:
+                    continue
+                try:
+                    ts = datetime.fromtimestamp(float(d.get("created_utc", 0)), tz=timezone.utc)
+                except (ValueError, OSError):
+                    continue
+                raw_rows.append({
+                    "timestamp": ts,
+                    "polarity": self._keyword_polarity(combined),
+                    "mention_count": mentions,
+                })
+
         return raw_rows
 
     # ------------------------------------------------------------------

@@ -29,6 +29,10 @@ python-dotenv>=1.0.0
 # Database (SQLite via SQLAlchemy; swap DATABASE_URL for Postgres later)
 sqlalchemy>=2.0,<3.0
 
+# API (React dashboard backend; uvicorn serves it on 127.0.0.1 only)
+fastapi>=0.129
+slowapi>=0.1.9
+
 # Logging and utilities
 python-dateutil>=2.8.0
 pytz>=2023.3.post1

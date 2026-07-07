@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0e0e10;
+  --color-surface: #1c1c1e;
+  --color-surface-2: #2c2c2e;
+  --color-elev: #3a3a3c;
+  --color-content: #f5f5f7;
+  --color-body: #d1d1d6;
+  --color-secondary: #98989d;
+  --color-tertiary: #6e6e73;
+  --color-accent: #0a84ff;
+  --color-up: #30d158;
+  --color-flat: #ff9f0a;
+  --color-down: #ff453a;
+  --color-violet: #bf5af2;
+  --color-hairline: rgba(255, 255, 255, 0.08);
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  --radius-card: 18px;
+
+  --ease-swift: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-content);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 1.47;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Every numeric readout aligns in columns */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: rgba(10, 132, 255, 0.35);
+}
+
+/* Recessive scrollbars on dark */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}

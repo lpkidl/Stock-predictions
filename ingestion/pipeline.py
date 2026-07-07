@@ -168,25 +168,33 @@ class DataIngestionPipeline:
             return []
 
         posts = []
+        ticker_upper = ticker.upper()
+        # Search endpoint requires auth; use subreddit feeds and filter locally
+        feed_endpoints = ["new", "hot"]
 
         for subreddit in settings.REDDIT_SUBREDDITS:
-            try:
-                url = f"https://www.reddit.com/r/{subreddit}/search.json"
-                params = {
-                    "q": ticker,
-                    "sort": "new",
-                    "limit": limit,
-                    "restrict_sr": "on",  # keep results within this subreddit
-                }
+            for feed in feed_endpoints:
+                try:
+                    url = f"https://www.reddit.com/r/{subreddit}/{feed}.json"
+                    params = {"limit": 100}
 
-                response = await self.session.get(url, params=params)
-                response.raise_for_status()
+                    response = await self.session.get(url, params=params)
+                    response.raise_for_status()
 
-                data = response.json()
-                if "data" in data and "children" in data["data"]:
-                    for post in data["data"]["children"]:
-                        if post["kind"] == "t3":
+                    data = response.json()
+                    before_count = len(posts)
+                    if "data" in data and "children" in data["data"]:
+                        for post in data["data"]["children"]:
+                            if post["kind"] != "t3":
+                                continue
                             post_data = post["data"]
+                            combined = (
+                                post_data.get("title", "") + " " +
+                                post_data.get("selftext", "")
+                            ).upper().split()
+                            # Only keep posts that mention this ticker
+                            if ticker_upper not in combined and f"${ticker_upper}" not in combined:
+                                continue
                             posts.append({
                                 "source": "reddit",
                                 "subreddit": subreddit,
@@ -201,24 +209,20 @@ class DataIngestionPipeline:
                                 "url": f"https://reddit.com{post_data.get('permalink', '')}"
                             })
 
-                logger.info(
-                    f"Fetched {len(posts)} posts for {ticker} from r/{subreddit}"
-                )
-                await asyncio.sleep(settings.REDDIT_DELAY)
-
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429:
-                    logger.warning("Rate limited by Reddit — waiting 60s before retry")
-                    await asyncio.sleep(60)
-                elif e.response.status_code == 403:
-                    logger.warning(
-                        f"Reddit .json returned 403 for r/{subreddit}. "
-                        "The subreddit may be private or require authentication."
+                    added = len(posts) - before_count
+                    logger.info(
+                        f"r/{subreddit}/{feed}.json — {added} posts mention {ticker}"
                     )
-                else:
-                    logger.error(f"HTTP error fetching Reddit data: {str(e)}")
-            except Exception as e:
-                logger.error(f"Error fetching Reddit posts for {ticker}: {str(e)}")
+                    await asyncio.sleep(settings.REDDIT_DELAY)
+
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429:
+                        logger.warning("Rate limited by Reddit — waiting 60s before retry")
+                        await asyncio.sleep(60)
+                    else:
+                        logger.error(f"HTTP {e.response.status_code} fetching r/{subreddit}/{feed}.json")
+                except Exception as e:
+                    logger.error(f"Error fetching r/{subreddit}/{feed}.json for {ticker}: {e}")
 
         # Optionally enrich top posts with comment text for deeper sentiment signal
         if settings.REDDIT_FETCH_COMMENTS and posts:
