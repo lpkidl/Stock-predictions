@@ -26,6 +26,9 @@ pydantic>=2.0.0
 pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
 
+# Database (SQLite via SQLAlchemy; swap DATABASE_URL for Postgres later)
+sqlalchemy>=2.0,<3.0
+
 # Logging and utilities
 python-dateutil>=2.8.0
 pytz>=2023.3.post1
@@ -36,8 +39,12 @@ apscheduler>=3.10.0
 # Optional social data sources
 # praw: official Reddit API (replaces broken raw HTTP scraper)
 praw>=7.7.1
-# twikit: X/Twitter scraper (requires free X account credentials in .env)
-twikit>=2.3.0
+# twikit: X/Twitter scraper (requires free X account credentials in .env).
+# NOTE: all twikit 2.x releases use Python 3.10+ syntax at import time and
+# crash on Python 3.9 — install only after upgrading the venv to >=3.10:
+#   pip install twikit>=2.3.0
+# The pipeline runs fine without it (news + Reddit sources still work).
+# twikit>=2.3.0
 # pandas-ta: optional accelerator for TechnicalIndicatorEngine.
 # All indicators (Ichimoku, ATR, ADX, BBW) are implemented in pure pandas/numpy
 # and work without this package.  Install only if pandas-ta supports your Python

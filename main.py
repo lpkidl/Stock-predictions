@@ -32,6 +32,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Database is best-effort: results are mirrored to SQLite alongside the JSON
+# outputs. A missing sqlalchemy install must not break the pipeline.
+try:
+    from db import writer as db_writer
+    from db.session import init_db as db_init
+    DB_AVAILABLE = True
+except Exception as _db_exc:  # pragma: no cover
+    logger.warning(f"Database layer unavailable — JSON outputs only: {_db_exc}")
+    db_writer = None
+    DB_AVAILABLE = False
+
 
 class StockForecasterPipeline:
     """
@@ -57,6 +68,7 @@ class StockForecasterPipeline:
         self.perf_tracker = PerformanceTracker(
             ledger_path=settings.PERFORMANCE_LEDGER_PATH
         )
+        self.run_id = None  # DB pipeline_runs.id, set in run_full_pipeline()
         
     async def initialize(self):
         """Initialize all pipeline components."""
@@ -116,10 +128,11 @@ class StockForecasterPipeline:
                 logger.warning("No aggregated data available for NLP stage")
                 return False
             
-            # Combine all social posts
+            # Combine all social posts and news articles
             all_posts = (
                 self.aggregated_data.get("reddit", []) +
-                self.aggregated_data.get("x", [])
+                self.aggregated_data.get("x", []) +
+                self.aggregated_data.get("news", [])
             )
             
             if not all_posts:
@@ -292,6 +305,24 @@ class StockForecasterPipeline:
                     },
                     predictions_by_horizon=ticker_preds,
                 )
+
+                if DB_AVAILABLE:
+                    test_by_h = {
+                        str(h): ticker_metrics.get(str(h), {}).get("test", {})
+                        for h in horizons
+                    }
+                    db_writer.save_performance_entries(self.run_id, [
+                        {
+                            "timestamp": datetime.now().isoformat(),
+                            "ticker": ticker,
+                            "horizon": h,
+                            "walk_forward": wf,
+                            "test_accuracy": test_by_h.get(str(h), {}).get("accuracy"),
+                            "test_f1": test_by_h.get(str(h), {}).get("f1"),
+                            "prediction": ticker_preds.get(str(h), {}),
+                        }
+                        for h, wf in ticker_wf.items()
+                    ])
 
                 logger.info(f"\n🔮 PREDICTIONS for {ticker}:")
                 for h, p in ticker_preds.items():
@@ -503,7 +534,11 @@ class StockForecasterPipeline:
         for ticker, ticker_data in self.predictions.items():
             stock_df = self.aggregated_data.get("stocks", {}).get(ticker)
             if stock_df is not None and not stock_df.empty and "Close" in stock_df.columns:
-                entry_price = round(float(stock_df["Close"].iloc[-1]), 4)
+                # yfinance can return multi-level columns, making this a Series
+                last_close = stock_df["Close"].iloc[-1]
+                if isinstance(last_close, pd.Series):
+                    last_close = last_close.iloc[0]
+                entry_price = round(float(last_close), 4)
             else:
                 entry_price = None
 
@@ -537,6 +572,10 @@ class StockForecasterPipeline:
         with open(history_path, "w") as f:
             json.dump(history, f, indent=2, default=str)
         logger.info(f"Saved prediction history to {history_path}")
+
+        if DB_AVAILABLE:
+            db_writer.upsert_prediction_outcomes(self.run_id, history)
+            db_writer.upsert_daily_accuracy(history)
 
         # ── Step 4: log accuracy summary ───────────────────────────────
         resolved = [r for r in history if r["status"] in ("correct", "incorrect")]
@@ -640,7 +679,14 @@ class StockForecasterPipeline:
                 with open(output_path / "sentiment_summary.json", "w") as f:
                     json.dump(sentiment_summary, f, indent=2)
                 logger.info(f"Saved sentiment summary to {output_path / 'sentiment_summary.json'}")
-            
+
+            # Mirror results to the database (best-effort; never raises)
+            if DB_AVAILABLE:
+                db_writer.save_posts(self.run_id, self.sentiment_results)
+                db_writer.save_daily_sentiment(self.run_id, self.sentiment_index)
+                db_writer.save_predictions(self.run_id, self.predictions)
+                db_writer.save_trades(self.run_id, self.trade_logs)
+
             logger.info(f"All results saved to {output_dir}/")
             
         except Exception as e:
@@ -657,10 +703,21 @@ class StockForecasterPipeline:
         
         # Initialize
         await self.initialize()
-        
+
+        # Open a DB run record (best-effort; JSON outputs are unaffected)
+        if DB_AVAILABLE:
+            try:
+                db_init()
+                self.run_id = db_writer.start_run()
+            except Exception as exc:
+                logger.warning(f"DB init failed — disabling DB writes for this run: {exc}")
+                db_writer._disabled = True
+
         # Stage 1: Ingestion
         if not await self.run_ingestion_stage():
             logger.error("Ingestion stage failed")
+            if DB_AVAILABLE:
+                db_writer.finish_run(self.run_id, "failed")
             return False
         
         # Cool-down between stages
@@ -678,6 +735,8 @@ class StockForecasterPipeline:
         # Stage 3: ML
         if not await self.run_ml_stage():
             logger.error("ML stage failed")
+            if DB_AVAILABLE:
+                db_writer.finish_run(self.run_id, "failed")
             return False
 
         # Stage 4: Execution simulation (non-fatal — pipeline continues on failure)
@@ -689,7 +748,10 @@ class StockForecasterPipeline:
 
         # Save results
         self.save_results()
-        
+
+        if DB_AVAILABLE:
+            db_writer.finish_run(self.run_id, "success")
+
         logger.info("\n" + "=" * 60)
         logger.info("✅ PIPELINE EXECUTION COMPLETE")
         logger.info(f"Time: {datetime.now()}")
@@ -720,6 +782,8 @@ async def main():
         logger.error(f"Unexpected error: {str(e)}")
         import traceback
         traceback.print_exc()
+        if DB_AVAILABLE:
+            db_writer.finish_run(pipeline.run_id, "failed")
         return 1
     finally:
         pipeline.cleanup()

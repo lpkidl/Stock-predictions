@@ -112,6 +112,11 @@ class Settings(BaseSettings):
     # Performance tracking
     PERFORMANCE_LEDGER_PATH: str = "results/performance_ledger.json"
 
+    # Database (SQLAlchemy URL; point at Postgres later via .env, e.g.
+    # DATABASE_URL=postgresql+psycopg2://user:pass@host/dbname)
+    DATABASE_URL: str = "sqlite:///results/stocks.db"
+    DB_ENABLED: bool = True  # set False to disable all DB writes
+
     # Scheduler (cron expression used by scheduler.py)
     SCHEDULER_CRON: str = "0 16 * * 1-5"  # 4 pm ET, Mon–Fri (after US market close)
 

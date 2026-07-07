@@ -5,6 +5,8 @@ probability bars, directional markers on price chart, and accuracy/F1/LOOCV
 model metrics from the v2 ensemble ML engine.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import sys
@@ -96,9 +98,20 @@ FEATURE_EXPLANATIONS = {
 }
 
 HORIZON_LABELS = {"1": "Tomorrow", "3": "3 Days", "5": "5 Days", "10": "10 Days"}
-HORIZON_COLORS = {"1": "#2196F3", "3": "#FF9800", "5": "#9C27B0", "10": "#F44336"}
-DIRECTION_COLORS = {"up": "#22c55e", "flat": "#f59e0b", "down": "#ef4444"}
+# Apple dark-mode system palette — every direction indicator also carries an
+# arrow glyph + text label, so meaning never rides on color alone.
+DIRECTION_COLORS = {"up": "#30d158", "flat": "#ff9f0a", "down": "#ff453a"}
+# On the dark surface the bright system colors are the readable text variants
+DIRECTION_TEXT = {"up": "#30d158", "flat": "#ff9f0a", "down": "#ff453a"}
 DIRECTION_ARROWS = {"up": "↑", "flat": "→", "down": "↓"}
+
+# Shared plotly styling (SF-style system font, recessive grid on dark)
+PLOT_FONT = dict(
+    family='-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+    color="#f5f5f7",
+)
+GRID_COLOR = "rgba(255,255,255,0.08)"
+ACCENT_BLUE = "#0a84ff"
 
 
 # ── Data helpers ─────────────────────────────────────────────────────────────
@@ -166,85 +179,195 @@ def setup_page():
     )
     st.markdown("""
     <style>
-    .fc-card {
-        border-radius: 14px;
-        padding: 22px 26px 18px;
-        margin-bottom: 4px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.10);
-        position: relative;
-        overflow: hidden;
+    /* ── Apple dark-mode global styling ────────────────────────────── */
+    /* Font override must NOT touch Streamlit's Material icon spans, or
+       icon ligatures render as raw text like "keyboard_double_arrow_right" */
+    [data-testid="stAppViewContainer"]
+      *:not([data-testid="stIconMaterial"]):not([class*="material-symbols"]):not([data-testid="stExpanderToggleIcon"]) {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+                     "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-    .fc-card::before {
-        content: "";
-        position: absolute;
-        left: 0; top: 0; bottom: 0;
-        width: 6px;
-        border-radius: 14px 0 0 14px;
+    [data-testid="stAppViewContainer"] {
+        background: #0e0e10;
+        color: #f5f5f7;
     }
-    .fc-up   { background: #f0fdf4; }
-    .fc-down { background: #fff5f5; }
-    .fc-flat { background: #fffbeb; }
-    .fc-up::before   { background: #22c55e; }
-    .fc-down::before { background: #ef4444; }
-    .fc-flat::before { background: #f59e0b; }
+    [data-testid="stHeader"] {
+        background: rgba(14,14,16,0.8);
+        backdrop-filter: blur(20px);
+    }
+    [data-testid="stSidebar"] {
+        background: #161618;
+        border-right: 1px solid rgba(255,255,255,0.06);
+    }
+    h1, h2, h3 { letter-spacing: -0.022em; font-weight: 650; color: #f5f5f7; }
+    h1 { font-size: 2.4rem; }
+    p, li { color: #d1d1d6; }
+    [data-testid="stCaptionContainer"] p { color: #98989d; }
+    hr { border-color: rgba(255,255,255,0.08); }
 
-    .fc-label {
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.1em;
+    /* Segmented-control style tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        background: #1c1c1e;
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 12px;
+        padding: 3px;
+        gap: 2px;
+        width: fit-content;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 9px;
+        padding: 6px 18px;
+        font-weight: 500;
+        color: #98989d;
+        background: transparent;
+    }
+    .stTabs [aria-selected="true"] {
+        background: #3a3a3c !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        color: #ffffff !important;
+    }
+    .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] {
+        display: none;
+    }
+
+    /* Metric tiles as cards */
+    [data-testid="stMetric"] {
+        background: #1c1c1e;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 16px;
+        padding: 14px 18px;
+    }
+    [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] p {
+        color: #98989d !important;
+        font-weight: 500;
+    }
+    [data-testid="stMetricValue"] {
+        color: #f5f5f7 !important;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+    }
+    [data-testid="stMetricDelta"] { color: #aeaeb2 !important; }
+
+    /* Sidebar: readable labels on the dark panel */
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {
+        color: #f5f5f7 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+        color: #98989d !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="select"] > div {
+        background: #2c2c2e;
+        border-radius: 10px;
+        border-color: rgba(255,255,255,0.12);
+    }
+
+    /* Hero price card */
+    .hero-card {
+        background: #1c1c1e;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 20px;
+        padding: 26px 32px 22px;
+        display: inline-block;
+        min-width: 300px;
+        margin-bottom: 6px;
+    }
+    .hero-ticker {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        color: #98989d;
         text-transform: uppercase;
-        color: #666;
+        margin-bottom: 2px;
+    }
+    .hero-price {
+        font-size: 44px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        color: #f5f5f7;
+        line-height: 1.15;
+    }
+    .hero-sub {
+        font-size: 13px;
+        color: #98989d;
+        margin-top: 6px;
+    }
+
+    [data-testid="stExpander"] {
+        background: #1c1c1e;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+        border-radius: 14px !important;
+    }
+    .stProgress > div > div > div { background: #0a84ff !important; }
+
+    /* ── Forecast cards ─────────────────────────────────────────────── */
+    .fc-card {
+        background: #1c1c1e;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 18px;
+        padding: 22px 26px 18px;
+        margin-bottom: 14px;
+    }
+    .fc-label {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #98989d;
         margin-bottom: 10px;
     }
     .fc-direction {
-        font-size: 32px;
-        font-weight: 800;
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
         line-height: 1.1;
-        margin-bottom: 6px;
+        margin-bottom: 4px;
     }
-    .fc-direction-up   { color: #15803d !important; }
-    .fc-direction-down { color: #b91c1c !important; }
-    .fc-direction-flat { color: #92400e !important; }
+    .fc-direction-up   { color: #30d158 !important; }
+    .fc-direction-down { color: #ff453a !important; }
+    .fc-direction-flat { color: #ff9f0a !important; }
     .fc-confidence {
         font-size: 14px;
-        color: #555 !important;
-        margin-bottom: 10px;
+        color: #aeaeb2 !important;
+        margin-bottom: 12px;
     }
-    .fc-probbar-wrap {
-        margin-top: 10px;
-    }
+    .fc-confidence b { color: #f5f5f7; }
+    .fc-probbar-wrap { margin-top: 9px; }
     .fc-probbar-label {
-        font-size: 11px;
-        color: #666 !important;
+        font-size: 12px;
+        color: #98989d !important;
         display: flex;
         justify-content: space-between;
         margin-bottom: 3px;
     }
     .fc-probbar-track {
-        background: #e5e7eb;
-        border-radius: 4px;
-        height: 7px;
-        margin-bottom: 5px;
+        background: rgba(255,255,255,0.10);
+        border-radius: 5px;
+        height: 6px;
+        margin-bottom: 6px;
         position: relative;
         overflow: hidden;
     }
     .fc-probbar-fill {
         height: 100%;
-        border-radius: 4px;
+        border-radius: 5px;
         position: absolute;
         left: 0; top: 0;
     }
     .fc-regime {
-        font-size: 11px;
-        color: #888 !important;
-        margin-top: 8px;
+        font-size: 12px;
+        color: #98989d !important;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255,255,255,0.08);
     }
+    .fc-regime b { color: #d1d1d6; font-weight: 590; }
     </style>
     """, unsafe_allow_html=True)
 
 
 def render_sidebar(tickers: list) -> dict:
-    st.sidebar.title("⚙️ Settings")
+    st.sidebar.title("Settings")
     ticker       = st.sidebar.selectbox("Stock to analyse", tickers, index=0)
     period_map   = {
         "1 Month": "1mo", "3 Months": "3mo", "6 Months": "6mo",
@@ -279,9 +402,9 @@ def _card_html(label: str, direction: str, confidence: float,
     color     = DIRECTION_COLORS.get(d, "#888")
 
     prob_bars = (
-        _prob_bar_html("↑ Up",   probabilities.get("up",   0), "#22c55e") +
-        _prob_bar_html("→ Flat", probabilities.get("flat", 0), "#f59e0b") +
-        _prob_bar_html("↓ Down", probabilities.get("down", 0), "#ef4444")
+        _prob_bar_html("↑ Up",   probabilities.get("up",   0), "#30d158") +
+        _prob_bar_html("→ Flat", probabilities.get("flat", 0), "#ff9f0a") +
+        _prob_bar_html("↓ Down", probabilities.get("down", 0), "#ff453a")
     )
 
     regime_html = (
@@ -346,20 +469,20 @@ def render_price_chart(stock_df: pd.DataFrame, ticker: str,
         open=stock_df["Open"], high=stock_df["High"],
         low=stock_df["Low"],   close=stock_df["Close"],
         name="Price",
-        increasing_line_color="#22c55e",
-        decreasing_line_color="#ef4444",
+        increasing_line_color="#30d158",
+        decreasing_line_color="#ff453a",
     ), row=1, col=1)
 
     sma20 = stock_df["Close"].rolling(20).mean()
     fig.add_trace(go.Scatter(
         x=stock_df["Date"], y=sma20,
-        name="20-Day Avg", line=dict(color="#f97316", width=1.5, dash="dot"),
+        name="20-Day Avg", line=dict(color="#ff9f0a", width=1.5, dash="dot"),
     ), row=1, col=1)
 
     sma50 = stock_df["Close"].rolling(50).mean()
     fig.add_trace(go.Scatter(
         x=stock_df["Date"], y=sma50,
-        name="50-Day Avg", line=dict(color="#8b5cf6", width=1.5, dash="dot"),
+        name="50-Day Avg", line=dict(color="#bf5af2", width=1.5, dash="dot"),
     ), row=1, col=1)
 
     # Directional forecast markers — diamonds at future dates at last_close level,
@@ -387,37 +510,42 @@ def render_price_chart(stock_df: pd.DataFrame, ticker: str,
             fig.add_trace(go.Scatter(
                 x=[fut_date],
                 y=[last_close],
-                mode="markers+text",
+                mode="markers",
                 marker=dict(symbol="diamond", size=14, color=color,
-                            line=dict(color="white", width=2)),
-                text=[f"  {label}  {arrow} {direction.upper()} ({confidence:.0%})"],
-                textposition="middle right",
-                textfont=dict(size=11, color=color),
-                name=label,
+                            line=dict(color="#0e0e10", width=2)),
+                name=f"{label} {arrow} {direction.upper()} ({confidence:.0%})",
+                hovertemplate=(
+                    f"{label}: {direction.upper()} "
+                    f"({confidence:.0%} confidence)<extra></extra>"
+                ),
             ), row=1, col=1)
 
     vol_colors = [
-        "#22c55e" if c >= o else "#ef4444"
+        "#30d158" if c >= o else "#ff453a"
         for c, o in zip(stock_df["Close"], stock_df["Open"])
     ]
     fig.add_trace(go.Bar(
         x=stock_df["Date"], y=stock_df["Volume"],
-        marker_color=vol_colors, showlegend=False,
+        marker_color=vol_colors, marker_line_width=0,
+        opacity=0.55, showlegend=False,
     ), row=2, col=1)
 
     fig.update_layout(
         xaxis_rangeslider_visible=False,
         height=600,
-        template="plotly_white",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                    xanchor="left", x=0),
-        margin=dict(t=80, b=20, l=10, r=10),
-        paper_bgcolor="white",
-        plot_bgcolor="#fafafa",
+        template="plotly_dark",
+        font=PLOT_FONT,
+        legend=dict(orientation="h", yanchor="bottom", y=1.06,
+                    xanchor="left", x=0, font=dict(size=11)),
+        margin=dict(t=110, b=20, l=10, r=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#1c1c1e",
+        hoverlabel=dict(font=PLOT_FONT, bgcolor="#2c2c2e",
+                        bordercolor="rgba(255,255,255,0.15)"),
     )
-    fig.update_yaxes(title_text="Price ($)", row=1, col=1, gridcolor="#f0f0f0")
-    fig.update_yaxes(title_text="Volume",   row=2, col=1, gridcolor="#f0f0f0")
-    fig.update_xaxes(gridcolor="#f0f0f0")
+    fig.update_yaxes(title_text="Price ($)", row=1, col=1, gridcolor=GRID_COLOR, zeroline=False)
+    fig.update_yaxes(title_text="Volume",   row=2, col=1, gridcolor=GRID_COLOR, zeroline=False)
+    fig.update_xaxes(gridcolor=GRID_COLOR, zeroline=False)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -444,25 +572,29 @@ def render_rsi_chart(stock_df: pd.DataFrame):
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=stock_df["Date"], y=rsi,
-        line=dict(color="#3b82f6", width=2), name="RSI",
-        fill="tozeroy", fillcolor="rgba(59,130,246,0.05)",
+        line=dict(color="#0a84ff", width=2), name="RSI",
+        fill="tozeroy", fillcolor="rgba(10,132,255,0.08)",
     ))
-    fig.add_hline(y=70, line_dash="dash", line_color="#ef4444",
+    fig.add_hline(y=70, line_dash="dash", line_color="#ff453a",
                   annotation_text="Overbought (70)", annotation_position="top left")
-    fig.add_hline(y=30, line_dash="dash", line_color="#22c55e",
+    fig.add_hline(y=30, line_dash="dash", line_color="#30d158",
                   annotation_text="Oversold (30)", annotation_position="bottom left")
-    fig.add_hrect(y0=70, y1=100, fillcolor="#ef4444", opacity=0.04, line_width=0)
-    fig.add_hrect(y0=0,  y1=30,  fillcolor="#22c55e", opacity=0.04, line_width=0)
+    fig.add_hrect(y0=70, y1=100, fillcolor="#ff453a", opacity=0.06, line_width=0)
+    fig.add_hrect(y0=0,  y1=30,  fillcolor="#30d158", opacity=0.06, line_width=0)
     fig.update_layout(
         title=dict(text=f"RSI Momentum — currently <b>{last_rsi:.1f}</b>  ·  {status}",
                    font=dict(size=14)),
-        yaxis=dict(title="RSI", range=[0, 100], gridcolor="#f0f0f0"),
-        xaxis=dict(gridcolor="#f0f0f0"),
+        yaxis=dict(title="RSI", range=[0, 100], gridcolor=GRID_COLOR),
+        xaxis=dict(gridcolor=GRID_COLOR),
         height=230,
-        template="plotly_white",
+        template="plotly_dark",
+        font=PLOT_FONT,
         showlegend=False,
         margin=dict(t=50, b=20, l=10, r=10),
-        plot_bgcolor="#fafafa",
+        plot_bgcolor="#1c1c1e",
+        paper_bgcolor="rgba(0,0,0,0)",
+        hoverlabel=dict(font=PLOT_FONT, bgcolor="#2c2c2e",
+                        bordercolor="rgba(255,255,255,0.15)"),
     )
     st.plotly_chart(fig, use_container_width=True)
     st.caption("RSI above 70 = overbought · below 30 = oversold · 30–70 = neutral")
@@ -480,15 +612,16 @@ def render_feature_importance(importance: dict, ticker: str, top_n: int):
     scores = [v for _, v in items]
     max_s  = max(scores) or 1
     colors = [
-        f"rgba(59,130,246,{0.25 + 0.75*(s/max_s):.2f})" for s in scores
+        f"rgba(10,132,255,{0.35 + 0.65*(s/max_s):.2f})" for s in scores
     ]
 
     fig = go.Figure(go.Bar(
         x=scores, y=labels, orientation="h",
-        marker=dict(color=colors, line=dict(width=0)),
+        marker=dict(color=colors, line=dict(width=0),
+                    cornerradius=4),
         text=[f"{s:.3f}" for s in scores],
         textposition="outside",
-        textfont=dict(size=11),
+        textfont=dict(size=11, color="#98989d"),
     ))
     fig.update_layout(
         title=dict(
@@ -496,12 +629,16 @@ def render_feature_importance(importance: dict, ticker: str, top_n: int):
             font=dict(size=15),
         ),
         xaxis=dict(title="Influence on prediction  (higher = more weight)",
-                   gridcolor="#f0f0f0"),
+                   gridcolor=GRID_COLOR, zeroline=False),
         yaxis=dict(automargin=True),
         height=max(320, top_n * 46),
-        template="plotly_white",
+        template="plotly_dark",
+        font=PLOT_FONT,
         margin=dict(l=10, r=80, t=60, b=40),
-        plot_bgcolor="#fafafa",
+        plot_bgcolor="#1c1c1e",
+        paper_bgcolor="rgba(0,0,0,0)",
+        hoverlabel=dict(font=PLOT_FONT, bgcolor="#2c2c2e",
+                        bordercolor="rgba(255,255,255,0.15)"),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -540,13 +677,13 @@ def render_metrics(metrics: dict, ticker: str):
         test  = m.get("test",  {})
         loocv = m.get("loocv", {})
 
-        with st.expander(f"📅  {label} model", expanded=(h_str == "1")):
+        with st.expander(f"{label} model", expanded=(h_str == "1")):
             st.write("")
 
             c1, gap_col, c2 = st.columns([5, 1, 5])
 
             with c1:
-                st.markdown("#### 🔧 Validation")
+                st.markdown("#### Validation")
                 st.caption("Used only for early stopping — not for evaluation.")
                 st.write("")
                 st.metric("Accuracy",  f"{val.get('accuracy', 0)*100:.1f} %",
@@ -556,7 +693,7 @@ def render_metrics(metrics: dict, ticker: str):
                           help="Macro-averaged F1 across 3 classes.")
 
             with c2:
-                st.markdown("#### 🧪 Test — unseen data")
+                st.markdown("#### Test — unseen data")
                 st.caption("Recent data the model never saw. This is what matters.")
                 st.write("")
                 st.metric("Accuracy",  f"{test.get('accuracy', 0)*100:.1f} %",
@@ -567,7 +704,7 @@ def render_metrics(metrics: dict, ticker: str):
 
             if loocv:
                 st.divider()
-                st.markdown("#### 🔄 Temporal LOOCV")
+                st.markdown("#### Temporal LOOCV")
                 st.caption(
                     "Each fold trains on all data up to a point and tests on "
                     "the single next sample — no look-ahead bias."
@@ -591,7 +728,7 @@ def render_metrics(metrics: dict, ticker: str):
             st.write("")
 
     st.divider()
-    st.markdown("#### ⚙️ Model Settings")
+    st.markdown("#### Model Settings")
     st.write("")
     p = settings.XGBOOST_CLASSIFIER_PARAMS.copy()
     p.pop("n_jobs", None)
@@ -624,12 +761,17 @@ def render_metrics(metrics: dict, ticker: str):
 def main():
     setup_page()
 
-    st.title("📈 Stock Forecaster")
+    st.markdown(
+        "<h1 style='margin-bottom:0'>Stock Forecaster</h1>"
+        "<p style='color:#98989d;font-size:1.05rem;margin-top:4px'>"
+        "Machine-learning forecasts, grounded in news sentiment and market structure."
+        "</p>",
+        unsafe_allow_html=True,
+    )
     st.caption(
         "XGBoost + LogisticRegression ensemble · 32 features · "
-        "Ternary classification (UP / FLAT / DOWN) · "
-        "Regime-aware models (bull / bear / sideways) · "
-        "Diamonds (◆) on chart show each forecast horizon"
+        "UP / FLAT / DOWN classification · regime-aware · "
+        "diamonds (◆) on the chart mark each forecast horizon"
     )
     st.divider()
 
@@ -652,14 +794,16 @@ def main():
     last_close = float(snap["Close"].iloc[-1]) if not snap.empty else None
     ts         = ticker_pred.get("timestamp", "")
 
-    info_col, _ = st.columns([3, 7])
-    with info_col:
-        st.metric(
-            label=ticker,
-            value=f"${last_close:,.2f}" if last_close else "Loading…",
-        )
-    if ts:
-        st.caption(f"Forecast generated: {ts[:19].replace('T', ' ')}")
+    price_str = f"${last_close:,.2f}" if last_close else "Loading…"
+    ts_str = f"Forecast generated {ts[:19].replace('T', ' ')}" if ts else ""
+    st.markdown(
+        f"""<div class="hero-card">
+  <div class="hero-ticker">{ticker}</div>
+  <div class="hero-price">{price_str}</div>
+  <div class="hero-sub">{ts_str}</div>
+</div>""",
+        unsafe_allow_html=True,
+    )
 
     st.write("")
 
@@ -670,7 +814,7 @@ def main():
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📊  Price Chart", "🤖  Model Performance", "🔍  All Tickers", "⚡  Trade Execution", "📈  Track Record"]
+        ["Price Chart", "Model Performance", "All Tickers", "Trade Execution", "Track Record"]
     )
 
     with tab1:
@@ -788,7 +932,7 @@ Above 80 = overbought; below 20 = oversold.
 
     with tab4:
         st.write("")
-        st.markdown("### ⚡ Stage 4 — ATR-Based Trade Execution")
+        st.markdown("### Trade Execution — ATR-Based Risk Management")
         st.caption(
             "Each ML prediction is cross-checked against 4 technical indicators before a trade fires. "
             "The final decision uses a blended score: 65% ML model confidence + 35% technical confirmation. "
@@ -844,14 +988,14 @@ Above 80 = overbought; below 20 = oversold.
 
                 for log in active:
                     is_long      = log["action"] == "long"
-                    action_color = "#22c55e" if is_long else "#ef4444"
+                    action_color = "#30d158" if is_long else "#ff453a"
                     action_label = "LONG  ↑" if is_long else "SHORT  ↓"
                     direction_word = "long (buy)" if is_long else "short (sell)"
 
                     st.markdown(
                         f"<div style='border-left:4px solid {action_color};"
                         f"padding:10px 16px;border-radius:4px;"
-                        f"background:rgba(0,0,0,0.03);margin-bottom:8px'>"
+                        f"background:rgba(255,255,255,0.06);margin-bottom:8px'>"
                         f"<span style='background:{action_color};color:white;"
                         f"padding:3px 12px;border-radius:4px;font-weight:bold;font-size:0.95em'>"
                         f"{action_label}</span>"
@@ -932,7 +1076,7 @@ Above 80 = overbought; below 20 = oversold.
                         for col, (key, confirmed) in zip(sig_cols, detail.items()):
                             label, tooltip = SIGNAL_LABELS.get(key, (key, ""))
                             icon  = "✅" if confirmed else "❌"
-                            color = "#22c55e" if confirmed else "#ef4444"
+                            color = "#30d158" if confirmed else "#ff453a"
                             result_word = "Confirmed" if confirmed else "Not confirmed"
                             col.markdown(
                                 f"<div style='text-align:center;padding:8px;border-radius:6px;"
@@ -1027,7 +1171,7 @@ $1,000 = 1% of the $100,000 simulated account. Maximum loss per trade is always 
 
     with tab5:
         st.write("")
-        st.markdown("### 📈 Real-World Prediction Track Record")
+        st.markdown("### Real-World Prediction Track Record")
         st.caption(
             "Every time the pipeline runs, predictions are saved with an expected outcome date. "
             "When that date arrives, the next run fetches the actual closing price, applies the same "

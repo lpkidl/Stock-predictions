@@ -326,7 +326,17 @@ class SentimentAnalyzer:
                 post_metadata.append({
                     "source": post.get("source", "unknown"),
                     "ticker": post.get("ticker", "UNKNOWN"),
-                    "timestamp": post.get("timestamp", datetime.now())
+                    "timestamp": post.get("timestamp", datetime.now()),
+                    # Extra fields persisted per-post to the database
+                    # (reddit posts carry post_id/subreddit/score;
+                    #  X posts carry author/likes)
+                    "url": post.get("url", ""),
+                    "post_id": post.get("post_id"),
+                    "subreddit": post.get("subreddit"),
+                    "author": post.get("author"),
+                    "title": post.get("title"),
+                    "full_text": combined_text,
+                    "engagement_score": post.get("score", post.get("likes", 0)),
                 })
         
         if not texts:

@@ -11,10 +11,17 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 import json
 
+import threading
+
 import httpx
 import yfinance as yf
 import pandas as pd
 from config import settings
+
+# yfinance (1.x, curl_cffi-based) is NOT thread-safe: concurrent downloads can
+# return another ticker's data or a merged multi-ticker frame. Serialize all
+# yf.download calls through this lock.
+_YF_LOCK = threading.Lock()
 
 # For X/Twitter integration
 try:
@@ -87,20 +94,37 @@ class DataIngestionPipeline:
         """
         try:
             loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(
-                self.executor,
-                lambda: yf.download(
-                    ticker,
-                    period=period,
-                    interval=interval,
-                    progress=False
-                )
-            )
-            
+
+            def _download():
+                with _YF_LOCK:
+                    return yf.download(
+                        ticker,
+                        period=period,
+                        interval=interval,
+                        progress=False
+                    )
+
+            data = await loop.run_in_executor(self.executor, _download)
+
             if data is not None and not data.empty:
-                # yfinance 1.x returns MultiIndex columns — flatten to single level
+                # yfinance 1.x returns MultiIndex columns (field, ticker).
+                # Select this ticker's columns explicitly — never accept a
+                # frame that belongs to (or mixes in) a different ticker.
                 if isinstance(data.columns, pd.MultiIndex):
-                    data.columns = data.columns.get_level_values(0)
+                    level1 = set(data.columns.get_level_values(1))
+                    if ticker in level1:
+                        data = data.xs(ticker, axis=1, level=1)
+                    elif level1 == {""}:
+                        data.columns = data.columns.get_level_values(0)
+                    else:
+                        logger.error(
+                            f"yfinance returned wrong data for {ticker} "
+                            f"(contains {sorted(level1)}) — discarding"
+                        )
+                        return None
+                if data.columns.duplicated().any():
+                    logger.error(f"Duplicate columns in {ticker} data — discarding")
+                    return None
                 data["ticker"] = ticker
                 logger.info(f"Successfully fetched {len(data)} rows for {ticker}")
                 await asyncio.sleep(settings.YFINANCE_DELAY)
@@ -394,6 +418,118 @@ class DataIngestionPipeline:
                 logger.warning(f"Could not fetch macro data for {ticker}")
         return macro
 
+    async def fetch_news_articles(self, ticker: str, limit: int = 25) -> List[Dict]:
+        """
+        Fetch financial news headlines for a ticker — no API key required.
+
+        Two free sources, merged and deduped by URL:
+          • yfinance Ticker.news (Yahoo Finance)
+          • Google News RSS search
+
+        Returns post dicts shaped like the social sources so they flow through
+        the same FinBERT sentiment pipeline (which was trained on financial
+        news, so these score better than social posts):
+        { source:"news", ticker, title, text, author (publisher),
+          timestamp (datetime), url }
+        """
+        articles: List[Dict] = []
+        seen_urls = set()
+
+        # ── Source 1: Yahoo Finance via yfinance ──────────────────────
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _fetch_yf_news():
+                with _YF_LOCK:
+                    return yf.Ticker(ticker).news or []
+
+            raw_items = await loop.run_in_executor(self.executor, _fetch_yf_news)
+            for item in raw_items[:limit]:
+                # yfinance >=1.x nests fields under "content"; older versions
+                # are flat — support both.
+                content = item.get("content", item)
+                title = content.get("title", "")
+                url = (
+                    (content.get("canonicalUrl") or {}).get("url")
+                    or (content.get("clickThroughUrl") or {}).get("url")
+                    or item.get("link", "")
+                )
+                publisher = (
+                    (content.get("provider") or {}).get("displayName")
+                    or item.get("publisher", "")
+                )
+                pub_date = content.get("pubDate") or item.get("providerPublishTime")
+                if isinstance(pub_date, (int, float)):
+                    timestamp = datetime.fromtimestamp(pub_date)
+                else:
+                    try:
+                        timestamp = pd.to_datetime(pub_date).to_pydatetime()
+                        if timestamp.tzinfo:
+                            timestamp = timestamp.replace(tzinfo=None)
+                    except Exception:
+                        timestamp = datetime.now()
+                if not title or not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                articles.append({
+                    "source": "news",
+                    "ticker": ticker,
+                    "title": title,
+                    "text": content.get("summary", "") or "",
+                    "author": publisher,
+                    "timestamp": timestamp,
+                    "url": url,
+                })
+        except Exception as e:
+            logger.warning(f"Yahoo Finance news fetch failed for {ticker}: {e}")
+
+        # ── Source 2: Google News RSS ─────────────────────────────────
+        try:
+            import xml.etree.ElementTree as ET
+            from email.utils import parsedate_to_datetime
+
+            rss_url = (
+                "https://news.google.com/rss/search"
+                f"?q={ticker}+stock&hl=en-US&gl=US&ceid=US:en"
+            )
+            resp = await self.session.get(rss_url)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.text)
+                for item in root.iter("item"):
+                    if len(articles) >= 2 * limit:
+                        break
+                    title = (item.findtext("title") or "").strip()
+                    url = (item.findtext("link") or "").strip()
+                    source_el = item.find("source")
+                    publisher = source_el.text if source_el is not None else "Google News"
+                    try:
+                        timestamp = parsedate_to_datetime(item.findtext("pubDate", ""))
+                        if timestamp.tzinfo:
+                            timestamp = timestamp.replace(tzinfo=None)
+                    except Exception:
+                        timestamp = datetime.now()
+                    if not title or not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    articles.append({
+                        "source": "news",
+                        "ticker": ticker,
+                        "title": title,
+                        "text": "",
+                        "author": publisher,
+                        "timestamp": timestamp,
+                        "url": url,
+                    })
+            else:
+                logger.warning(
+                    f"Google News RSS returned {resp.status_code} for {ticker}"
+                )
+        except Exception as e:
+            logger.warning(f"Google News RSS fetch failed for {ticker}: {e}")
+
+        logger.info(f"Fetched {len(articles)} news article(s) for {ticker}")
+        return articles
+
     async def fetch_earnings_dates(self, ticker: str) -> List:
         """
         Fetch historical + upcoming earnings dates via yfinance.
@@ -424,6 +560,7 @@ class DataIngestionPipeline:
             "stocks":   {},
             "reddit":   [],
             "x":        [],
+            "news":     [],
             "macro":    {},
             "earnings": {},
             "timestamp": datetime.now().isoformat(),
@@ -449,14 +586,16 @@ class DataIngestionPipeline:
         for ticker, dates in zip(self.tickers, earnings_results):
             aggregated_data["earnings"][ticker] = dates
 
-        # Fetch social media data concurrently
-        reddit_results, x_results = await asyncio.gather(
+        # Fetch social media + news data concurrently
+        reddit_results, x_results, news_results = await asyncio.gather(
             asyncio.gather(*[self.fetch_reddit_posts(t) for t in self.tickers]),
             asyncio.gather(*[self.fetch_x_posts(t) for t in self.tickers]),
+            asyncio.gather(*[self.fetch_news_articles(t) for t in self.tickers]),
         )
 
         aggregated_data["reddit"] = [p for posts in reddit_results for p in posts]
         aggregated_data["x"]      = [p for posts in x_results      for p in posts]
+        aggregated_data["news"]   = [p for posts in news_results   for p in posts]
 
         # ----------------------------------------------------------------
         # Optional Layer 1-A: Alpha Vantage intraday OHLCV
@@ -523,6 +662,7 @@ class DataIngestionPipeline:
             f"Aggregated data: {len(aggregated_data['stocks'])} stocks, "
             f"{len(aggregated_data['macro'])} macro series, "
             f"{len(aggregated_data['reddit'])} Reddit posts, "
-            f"{len(aggregated_data['x'])} X posts"
+            f"{len(aggregated_data['x'])} X posts, "
+            f"{len(aggregated_data['news'])} news articles"
         )
         return aggregated_data
