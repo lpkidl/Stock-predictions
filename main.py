@@ -231,8 +231,15 @@ class StockForecasterPipeline:
                 )
 
                 for horizon in horizons:
+                    # Select the top-K features on the training slice, then use
+                    # the SAME list for both the model and the walk-forward
+                    # backtest so the reliability number reflects what ships.
+                    selected_features = self.ml_predictor.select_features(
+                        merged_data, horizon, top_k=settings.FEATURE_TOP_K
+                    )
                     prep_result = self.ml_predictor.prepare_training_data(
                         merged_data, forecast_horizon=horizon,
+                        feature_cols=selected_features,
                     )
                     if prep_result is None:
                         logger.warning(f"Could not prepare training data for {ticker} h{horizon}d")
@@ -250,7 +257,7 @@ class StockForecasterPipeline:
 
                     # Walk-forward backtest (primary reliability signal)
                     logger.info(f"Running walk-forward backtest for {ticker} h{horizon}d ...")
-                    wf_result = wf_backtester.run(merged_data, feature_cols, horizon)
+                    wf_result = wf_backtester.run(merged_data, selected_features, horizon)
                     ticker_wf[horizon] = wf_result
 
                     # LOOCV before fitting the final model
@@ -274,8 +281,11 @@ class StockForecasterPipeline:
 
                     if len(X_test) > 0:
                         current_regime = self.ml_predictor.get_current_regime(merged_data)
-                        pred = self.ml_predictor.predict(
-                            X_test[-1:], regime=current_regime, horizon=horizon
+                        # Forecast the FUTURE move from today's features (not the
+                        # horizon-stale X_test[-1], whose move is already realized).
+                        pred = self.ml_predictor.predict_latest(
+                            merged_data, selected_features,
+                            horizon=horizon, regime=current_regime,
                         )
                         if "direction" in pred:
                             ticker_preds[str(horizon)] = {

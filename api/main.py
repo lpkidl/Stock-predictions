@@ -31,6 +31,7 @@ from api.routers import (
     metrics,
     predictions,
     prices,
+    sources,
     track_record,
     trades,
 )
@@ -58,7 +59,7 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-for r in (meta, predictions, prices, features, metrics, trades, track_record):
+for r in (meta, predictions, prices, features, metrics, trades, track_record, sources):
     app.include_router(r.router, prefix="/api")
 
 

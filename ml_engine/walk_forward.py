@@ -17,6 +17,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_sample_weight
 import xgboost as xgb
 
 from config import settings
@@ -101,8 +102,12 @@ class WalkForwardBacktester:
             X_te_s = scaler.transform(X_te)
 
             try:
+                sw = (
+                    compute_sample_weight("balanced", y_tr)
+                    if settings.BALANCE_CLASS_WEIGHTS else None
+                )
                 xgb_clf = xgb.XGBClassifier(**self._xgb_params())
-                xgb_clf.fit(X_tr_s, y_tr, verbose=False)
+                xgb_clf.fit(X_tr_s, y_tr, sample_weight=sw, verbose=False)
 
                 lr = LogisticRegression(
                     max_iter=500, C=0.5, class_weight="balanced",

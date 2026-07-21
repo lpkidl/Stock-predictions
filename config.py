@@ -35,11 +35,24 @@ class Settings(BaseSettings):
     SENTIMENT_MODEL: str = "ProsusAI/finbert"
     SENTIMENT_BATCH_SIZE: int = 16
 
-    # Data quantity — 2 years gives ~500 rows, enough for regime-specific models
-    HISTORICAL_PERIOD: str = "2y"
+    # Data quantity — 10 years (~2500 rows) so the model has enough history to
+    # generalise instead of overfitting the ~350-row training slice of a 2y window.
+    HISTORICAL_PERIOD: str = "10y"
 
     # Macro / market-context tickers fetched alongside stocks
     MACRO_TICKERS: list = ["^VIX", "^TNX", "^IRX", "QQQ", "XLK", "XLY"]
+
+    # Company-name keywords for news relevance filtering. A fetched article is
+    # kept for a ticker only if the symbol or one of these aliases appears in its
+    # title/text — otherwise Yahoo's "related news" surfaces off-topic articles
+    # (e.g. a Domino's piece tagged NVDA) whose sentiment pollutes the ticker.
+    TICKER_ALIASES: dict = {
+        "AAPL":  ["apple"],
+        "NVDA":  ["nvidia"],
+        "TSLA":  ["tesla"],
+        "GOOGL": ["google", "alphabet"],
+        "MSFT":  ["microsoft"],
+    }
 
     # Maps each stock ticker to the sector ETF used for relative-strength features
     SECTOR_ETF_MAP: dict = {
@@ -61,6 +74,28 @@ class Settings(BaseSettings):
 
     # Minimum training rows required before training a regime-specific model
     REGIME_MIN_ROWS: int = 80
+
+    # --- Model-quality overhaul knobs -------------------------------------
+    # Per-regime sub-models split the (already small) training set into
+    # bull/bear/sideways slices that mostly fell below REGIME_MIN_ROWS and fell
+    # back anyway. Off by default: train ONE ensemble on all data and feed the
+    # regime in as the numeric `regime_code` feature instead.
+    USE_REGIME_MODELS: bool = False
+    # Keep only the top-K features (by XGBoost gain on the training slice) to cut
+    # overfitting from ~43 features on a few hundred rows. None = keep all.
+    FEATURE_TOP_K: Optional[int] = 15
+    # Wrap the base classifiers in probability calibration so `confidence` is
+    # trustworthy — the execution engine gates trades on it.
+    CALIBRATE_PROBABILITIES: bool = True
+    # Balance class weights so the model doesn't collapse toward the majority
+    # ("flat"/"up") class — the cause of the low F1 scores.
+    BALANCE_CLASS_WEIGHTS: bool = True
+    # Cap the number of expanding-window LOOCV folds. LOOCV retrains a model per
+    # fold, so on the 10y window an unbounded loop is ~1.7k fits/horizon (tens of
+    # minutes). Striding to this many evenly-spaced folds keeps the estimate
+    # meaningful while bounding runtime; the 54-fold walk-forward is the primary
+    # reliability signal regardless.
+    LOOCV_MAX_FOLDS: int = 150
 
     # Alpha Vantage API (Layer 1 — dual data ingestion)
     ALPHA_VANTAGE_API_KEY: Optional[str] = None   # set in .env: ALPHA_VANTAGE_API_KEY=...
@@ -105,8 +140,9 @@ class Settings(BaseSettings):
     }
     
     # Walk-forward backtesting
-    WF_MIN_TRAIN: int = 200   # minimum bars before the first out-of-sample window
-    WF_STEP: int = 21         # bars to advance the training cutoff each fold (~1 month)
+    WF_MIN_TRAIN: int = 250   # minimum bars before the first out-of-sample window
+    WF_STEP: int = 42         # bars to advance the training cutoff each fold (~2 months);
+                              # larger step keeps fold count sane on the 10y window
     WF_TEST_WINDOW: int = 21  # bars per out-of-sample evaluation window
 
     # Performance tracking

@@ -9,7 +9,7 @@ export default function Card({
 }) {
   return (
     <div
-      className={`rounded-card border border-hairline bg-surface p-6 transition-[border-color,transform] duration-150 ${className}`}
+      className={`rounded-card border border-hairline bg-surface p-6 transition-[border-color,transform,box-shadow] duration-200 hover:border-white/[0.14] ${className}`}
     >
       {children}
     </div>

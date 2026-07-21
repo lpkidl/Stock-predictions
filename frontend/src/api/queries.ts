@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { fetchJson } from "./client";
 import type {
   AppConfig,
+  DataSourcesResponse,
   FeaturesResponse,
   MetricsResponse,
   PredictionsResponse,
@@ -58,4 +59,21 @@ export const tradesQuery = queryOptions({
 export const trackRecordQuery = queryOptions({
   queryKey: ["track-record"],
   queryFn: () => fetchJson<TrackRecordResponse>("/api/track-record"),
+});
+
+export const dataSourcesQuery = (ticker?: string) =>
+  queryOptions({
+    queryKey: ["data-sources", ticker ?? "all"],
+    queryFn: () =>
+      fetchJson<DataSourcesResponse>(
+        `/api/data-sources?limit=120${ticker ? `&ticker=${ticker}` : ""}`,
+      ),
+  });
+
+export const sentimentSummaryQuery = queryOptions({
+  queryKey: ["sentiment-summary"],
+  queryFn: () =>
+    fetchJson<Record<string, { score: number; trend: number; days: number }>>(
+      "/api/sentiment-summary",
+    ),
 });

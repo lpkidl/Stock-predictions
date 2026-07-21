@@ -1,19 +1,17 @@
 import { Suspense, useMemo } from "react";
 import { Outlet, useLocation } from "react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import {
-  predictionsQuery,
-  pricesQuery,
-  quotesQuery,
-} from "../../api/queries";
+import { predictionsQuery, quotesQuery } from "../../api/queries";
 import { useTicker } from "../../hooks/useTicker";
 import { HORIZON_LABELS } from "../../lib/constants";
 import ForecastCard from "../forecast/ForecastCard";
 import HeroCard from "../forecast/HeroCard";
+import TickerStatsPanel from "../forecast/TickerStatsPanel";
 import Skeleton from "../ui/Skeleton";
 import GlassHeader from "./GlassHeader";
 import NavTabs from "./NavTabs";
+import TickerTabs from "./TickerTabs";
 
 const stagger = {
   hidden: {},
@@ -23,9 +21,8 @@ const stagger = {
 export default function AppLayout() {
   const reduced = useReducedMotion();
   const { pathname } = useLocation();
-  const queryClient = useQueryClient();
 
-  const [ticker, setTicker, tickers] = useTicker();
+  const [ticker] = useTicker();
   const { data: predictions, isLoading: predsLoading } =
     useQuery(predictionsQuery);
   const { data: quotes } = useQuery(quotesQuery);
@@ -40,27 +37,22 @@ export default function AppLayout() {
 
   const price = quotes?.[ticker]?.price ?? null;
 
-  const handleTickerChange = (t: string) => {
-    setTicker(t);
-    // Warm the chart before the user reaches it.
-    void queryClient.prefetchQuery(pricesQuery(t, "1y"));
-  };
-
   return (
     <div className="min-h-screen">
-      <GlassHeader
-        tickers={tickers}
-        ticker={ticker}
-        onTickerChange={handleTickerChange}
-      />
+      <GlassHeader />
 
       <main className="mx-auto max-w-[1100px] px-6 pb-16">
-        <section className="pt-10">
+        <section className="pt-8">
+          <TickerTabs />
+        </section>
+
+        <section className="flex flex-col gap-4 pt-6 lg:flex-row lg:items-stretch">
           <HeroCard
             ticker={ticker || "—"}
             price={price}
             timestamp={tickerPred?.timestamp ?? null}
           />
+          <TickerStatsPanel className="flex-1" />
         </section>
 
         <section className="mt-8" aria-label="Forecasts">

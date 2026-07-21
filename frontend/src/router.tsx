@@ -16,6 +16,7 @@ export const router = createBrowserRouter([
       { path: "tickers", lazy: page(() => import("./pages/AllTickersPage")) },
       { path: "trades", lazy: page(() => import("./pages/TradesPage")) },
       { path: "track-record", lazy: page(() => import("./pages/TrackRecordPage")) },
+      { path: "data-sources", lazy: page(() => import("./pages/DataSourcesPage")) },
       { path: "*", element: <Navigate to="/chart" replace /> },
     ],
   },

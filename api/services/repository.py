@@ -16,7 +16,15 @@ from . import json_store
 logger = logging.getLogger(__name__)
 
 try:
-    from db.models import DailyAccuracy, Prediction, PredictionOutcome, Trade
+    from db.models import (
+        DailyAccuracy,
+        DailySentiment,
+        PipelineRun,
+        Post,
+        Prediction,
+        PredictionOutcome,
+        Trade,
+    )
     from db.session import session_scope
 
     DB_IMPORTABLE = True
@@ -245,6 +253,168 @@ def get_track_record() -> dict:
     logger.info("Serving track record from results/prediction_history.json")
     history = json_store.load_json("prediction_history.json", default=[])
     return build_track_record(history)
+
+
+# ── Data sources (recorded posts + sentiment) ─────────────────────────────────
+
+def _post_row_to_dict(r) -> dict:
+    return {
+        "source": r.source,
+        "ticker": r.ticker,
+        "subreddit": r.subreddit,
+        "author": r.author,
+        "title": r.title,
+        "url": r.url,
+        "engagement_score": r.engagement_score,
+        "sentiment_label": r.sentiment_label,
+        "sentiment_score": r.sentiment_score,
+        "posted_at": _iso(r.posted_at),
+    }
+
+
+def _empty_data_sources() -> dict:
+    return {
+        "recording": {
+            "db_enabled": bool(settings.DB_ENABLED),
+            "total_posts": 0,
+            "last_recorded": None,
+            "last_run": None,
+            "runs": 0,
+            "sentiment_days": 0,
+        },
+        "by_source": [],
+        "by_sentiment": [],
+        "by_ticker": [],
+        "posts": [],
+    }
+
+
+def get_data_sources(limit: int = 60, ticker: str | None = None) -> dict:
+    """Live view of what the pipeline has recorded into the DB: the raw
+    sentiment posts (with their source links) plus recording metadata.
+
+    Posts are DB-only — they were never written to JSON — so this returns an
+    empty (but valid) shape when the DB is disabled/unavailable/unpopulated."""
+    if not _db_ready():
+        return _empty_data_sources()
+    try:
+        from sqlalchemy import func
+
+        with session_scope() as s:
+            total = s.query(func.count(Post.id)).scalar() or 0
+            if not total:
+                return _empty_data_sources()
+
+            by_source = [
+                {"source": src or "unknown", "count": n}
+                for src, n in s.query(Post.source, func.count(Post.id))
+                .group_by(Post.source)
+                .order_by(func.count(Post.id).desc())
+                .all()
+            ]
+            by_sentiment = [
+                {"label": lbl or "unknown", "count": n}
+                for lbl, n in s.query(Post.sentiment_label, func.count(Post.id))
+                .group_by(Post.sentiment_label)
+                .all()
+            ]
+            by_ticker = [
+                {
+                    "ticker": tk,
+                    "count": n,
+                    "avg_score": round(avg, 4) if avg is not None else None,
+                }
+                for tk, n, avg in s.query(
+                    Post.ticker, func.count(Post.id), func.avg(Post.sentiment_score)
+                )
+                .group_by(Post.ticker)
+                .order_by(func.count(Post.id).desc())
+                .all()
+            ]
+            last_recorded = _iso(s.query(func.max(Post.created_at)).scalar())
+            sentiment_days = s.query(func.count(func.distinct(DailySentiment.date))).scalar() or 0
+            runs = s.query(func.count(PipelineRun.id)).scalar() or 0
+
+            run = s.query(PipelineRun).order_by(PipelineRun.id.desc()).first()
+            last_run = None
+            if run is not None:
+                last_run = {
+                    "id": run.id,
+                    "started_at": _iso(run.started_at),
+                    "finished_at": _iso(run.finished_at),
+                    "status": run.status,
+                    "tickers": run.tickers,
+                }
+
+            q = s.query(Post)
+            if ticker:
+                q = q.filter(Post.ticker == ticker)
+            rows = (
+                q.order_by(Post.posted_at.desc().nullslast(), Post.id.desc())
+                .limit(max(1, min(limit, 200)))
+                .all()
+            )
+            posts = [_post_row_to_dict(r) for r in rows]
+
+            return {
+                "recording": {
+                    "db_enabled": bool(settings.DB_ENABLED),
+                    "total_posts": total,
+                    "last_recorded": last_recorded,
+                    "last_run": last_run,
+                    "runs": runs,
+                    "sentiment_days": sentiment_days,
+                },
+                "by_source": by_source,
+                "by_sentiment": by_sentiment,
+                "by_ticker": by_ticker,
+                "posts": posts,
+            }
+    except Exception as e:
+        logger.warning(f"DB data-sources read failed: {e}")
+        return _empty_data_sources()
+
+
+# ── Sentiment summary (per-ticker, for the ticker tabs) ───────────────────────
+
+def get_sentiment_summary() -> dict:
+    """Per-ticker sentiment snapshot for the ticker tabs:
+    {ticker: {score, trend, days}}. `score` is the latest daily sentiment,
+    `trend` is latest minus the mean of the prior 5 days (>0 improving).
+    Empty dict when the DB is unavailable/unpopulated."""
+    if not _db_ready():
+        return {}
+    try:
+        with session_scope() as s:
+            rows = (
+                s.query(
+                    DailySentiment.ticker,
+                    DailySentiment.date,
+                    DailySentiment.sentiment_score,
+                )
+                .order_by(DailySentiment.ticker, DailySentiment.date)
+                .all()
+            )
+        if not rows:
+            return {}
+        by_ticker: dict[str, list] = {}
+        for tk, _d, score in rows:
+            if score is not None:
+                by_ticker.setdefault(tk, []).append(float(score))
+        out: dict[str, dict] = {}
+        for tk, scores in by_ticker.items():
+            latest = scores[-1]
+            prior = scores[-6:-1] if len(scores) > 1 else []
+            trend = latest - (sum(prior) / len(prior)) if prior else 0.0
+            out[tk] = {
+                "score": round(latest, 4),
+                "trend": round(trend, 4),
+                "days": len(scores),
+            }
+        return out
+    except Exception as e:
+        logger.warning(f"DB sentiment-summary read failed: {e}")
+        return {}
 
 
 # ── JSON-only sources ─────────────────────────────────────────────────────────

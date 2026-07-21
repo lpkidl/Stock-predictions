@@ -8,6 +8,7 @@ const TABS = [
   { to: "/tickers", label: "All Tickers" },
   { to: "/trades", label: "Trade Execution" },
   { to: "/track-record", label: "Track Record" },
+  { to: "/data-sources", label: "Data Sources" },
 ];
 
 /** Segmented-control page navigation; the selected ticker (?t=) is carried

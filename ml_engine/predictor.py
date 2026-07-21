@@ -22,8 +22,13 @@ import ta
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.frozen import FrozenEstimator
+from sklearn.utils.class_weight import compute_sample_weight
 import xgboost as xgb
 from config import settings
+
+REGIME_CODE = {"bear": -1.0, "sideways": 0.0, "bull": 1.0}
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +185,7 @@ class MLPredictor:
         df = df.copy()
         if "SMA_50" not in df.columns or "SMA_200" not in df.columns:
             df["regime"] = REGIME_SIDEWAYS
+            df["regime_code"] = REGIME_CODE[REGIME_SIDEWAYS]
             return df
 
         close = df["Close"]
@@ -189,6 +195,9 @@ class MLPredictor:
             [bull, bear], [REGIME_BULL, REGIME_BEAR], default=REGIME_SIDEWAYS
         )
         df.loc[df["SMA_200"].isna(), "regime"] = REGIME_SIDEWAYS
+        # Numeric encoding so the single all-data model can still use the regime
+        # as a feature (replaces the old per-regime model split).
+        df["regime_code"] = df["regime"].map(REGIME_CODE).astype(float)
         return df
 
     def get_current_regime(self, df: pd.DataFrame) -> str:
@@ -382,6 +391,38 @@ class MLPredictor:
             and pd.api.types.is_numeric_dtype(df[c])
         ]
 
+    def select_features(
+        self, df: pd.DataFrame, forecast_horizon: int, top_k: Optional[int] = None
+    ) -> List[str]:
+        """Rank features by XGBoost gain on the TRAINING slice only (first
+        1 - val - test of the data) and return the top-k names. Fitting on the
+        training slice keeps val/test out of the selection to avoid leakage.
+
+        Returns all features when top_k is None or there aren't enough rows to
+        rank reliably — callers fall back to the full set gracefully."""
+        all_cols = self._get_feature_cols(df)
+        if top_k is None or len(all_cols) <= top_k:
+            return all_cols
+        try:
+            df_clean = df.dropna(subset=["Close"])
+            X_raw, y, _, _ = self._build_xy(df_clean, all_cols, forecast_horizon)
+            train_end = int(len(X_raw) * (1.0 - 0.15 - 0.15))
+            X_tr, y_tr = X_raw[:train_end], y[:train_end]
+            if len(np.unique(y_tr)) < 2 or len(X_tr) < 50:
+                return all_cols
+            ranker = xgb.XGBClassifier(**self._xgb_params(remove_early_stop=True))
+            ranker.fit(X_tr, y_tr, verbose=False)
+            order = np.argsort(ranker.feature_importances_)[::-1][:top_k]
+            selected = [all_cols[i] for i in sorted(order)]
+            logger.info(
+                f"Feature selection h{forecast_horizon}d: kept {len(selected)}/"
+                f"{len(all_cols)} → {selected}"
+            )
+            return selected
+        except Exception as e:
+            logger.warning(f"Feature selection failed (h{forecast_horizon}d): {e} — keeping all")
+            return all_cols
+
     def _build_xy(
         self,
         df_clean: pd.DataFrame,
@@ -421,11 +462,16 @@ class MLPredictor:
         forecast_horizon: int = 1,
         val_ratio: float = 0.15,
         test_ratio: float = 0.15,
+        feature_cols: Optional[List[str]] = None,
     ) -> Optional[Tuple]:
         """
         70% train / 15% val / 15% test chronological split.
         Val is used exclusively for early stopping and ensemble weighting.
         Returns scaled arrays and ternary class labels.
+
+        Pass `feature_cols` to use a pre-selected subset (kept identical to the
+        one handed to the walk-forward backtester); otherwise all numeric
+        features are used.
         """
         try:
             df_clean = df.dropna(subset=["Close"])
@@ -435,7 +481,8 @@ class MLPredictor:
                 )
                 return None
 
-            feature_cols = self._get_feature_cols(df_clean)
+            if feature_cols is None:
+                feature_cols = self._get_feature_cols(df_clean)
             X_raw, y, regimes, dates = self._build_xy(df_clean, feature_cols, forecast_horizon)
 
             n         = len(X_raw)
@@ -510,13 +557,24 @@ class MLPredictor:
             logger.warning(f"{label}: only 1 class in training data, skipping")
             return None
         try:
-            # early_stopping_rounds goes in the constructor for XGBoost 3.x
-            params  = self._xgb_params(remove_early_stop=not use_early_stop)
+            # Balance class weights so the model doesn't collapse toward the
+            # majority ("flat"/"up") class.
+            sample_weight = (
+                compute_sample_weight("balanced", y_tr)
+                if settings.BALANCE_CLASS_WEIGHTS else None
+            )
+
+            calibrating = settings.CALIBRATE_PROBABILITIES and len(np.unique(y_val)) >= 2
+            # Early stopping and prefit-calibration don't compose (calibration
+            # refits nothing but reads a fixed model); skip ES when calibrating.
+            use_es  = use_early_stop and not calibrating
+            params  = self._xgb_params(remove_early_stop=not use_es)
             xgb_clf = xgb.XGBClassifier(**params)
-            if use_early_stop:
-                xgb_clf.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
+            if use_es:
+                xgb_clf.fit(X_tr, y_tr, sample_weight=sample_weight,
+                            eval_set=[(X_val, y_val)], verbose=False)
             else:
-                xgb_clf.fit(X_tr, y_tr, verbose=False)
+                xgb_clf.fit(X_tr, y_tr, sample_weight=sample_weight, verbose=False)
 
             lr = LogisticRegression(
                 max_iter=1000, C=0.5, class_weight="balanced",
@@ -524,13 +582,32 @@ class MLPredictor:
             )
             lr.fit(X_tr, y_tr)
 
-            xgb_acc = accuracy_score(y_val, xgb_clf.predict(X_val))
-            lr_acc  = accuracy_score(y_val, lr.predict(X_val))
+            xgb_model, lr_model = xgb_clf, lr
+            if calibrating:
+                # Prefit calibration on the held-out validation slice so the
+                # `confidence` the execution engine trades on is trustworthy.
+                try:
+                    xgb_model = CalibratedClassifierCV(
+                        FrozenEstimator(xgb_clf), method="sigmoid"
+                    ).fit(X_val, y_val)
+                    lr_model = CalibratedClassifierCV(
+                        FrozenEstimator(lr), method="sigmoid"
+                    ).fit(X_val, y_val)
+                except Exception as ce:
+                    logger.warning(f"{label}: calibration failed ({ce}) — using raw probabilities")
+                    xgb_model, lr_model = xgb_clf, lr
+
+            xgb_acc = accuracy_score(y_val, xgb_model.predict(X_val))
+            lr_acc  = accuracy_score(y_val, lr_model.predict(X_val))
             total   = xgb_acc + lr_acc
             w_xgb   = xgb_acc / total if total > 0 else 0.5
             w_lr    = lr_acc  / total if total > 0 else 0.5
 
-            return {"xgb": xgb_clf, "lr": lr, "w_xgb": w_xgb, "w_lr": w_lr}
+            return {
+                "xgb": xgb_model, "lr": lr_model,
+                "w_xgb": w_xgb, "w_lr": w_lr,
+                "xgb_raw": xgb_clf,  # uncalibrated tree model, for feature importance
+            }
 
         except Exception as e:
             logger.error(f"Error training ensemble {label}: {e}")
@@ -571,25 +648,29 @@ class MLPredictor:
             return
         self.models[horizon]["_fallback"] = fallback
 
-        # Per-regime models
+        # Per-regime models (optional). Splitting the training set into
+        # bull/bear/sideways slices starved every sub-model of data — most fell
+        # below REGIME_MIN_ROWS and fell back anyway. Off by default: the single
+        # all-data model uses `regime_code` as a feature instead.
         regime_counts = {}
-        for regime in [REGIME_BULL, REGIME_BEAR, REGIME_SIDEWAYS]:
-            mask = regimes_train == regime
-            n    = int(mask.sum())
-            regime_counts[regime] = n
-            if n < settings.REGIME_MIN_ROWS:
-                logger.info(
-                    f"  Regime {regime}: {n} rows < {settings.REGIME_MIN_ROWS} min, using fallback"
+        if settings.USE_REGIME_MODELS:
+            for regime in [REGIME_BULL, REGIME_BEAR, REGIME_SIDEWAYS]:
+                mask = regimes_train == regime
+                n    = int(mask.sum())
+                regime_counts[regime] = n
+                if n < settings.REGIME_MIN_ROWS:
+                    logger.info(
+                        f"  Regime {regime}: {n} rows < {settings.REGIME_MIN_ROWS} min, using fallback"
+                    )
+                    continue
+                ens = self._train_ensemble(
+                    X_train[mask], y_train[mask], X_val, y_val,
+                    label=f"h{horizon}:{regime}",
                 )
-                continue
-            ens = self._train_ensemble(
-                X_train[mask], y_train[mask], X_val, y_val,
-                label=f"h{horizon}:{regime}",
-            )
-            if ens is not None:
-                self.models[horizon][regime] = ens
-                acc = accuracy_score(y_val, self._predict_cls(ens, X_val))
-                logger.info(f"  Regime {regime} ({n} rows): val acc {acc:.3f}")
+                if ens is not None:
+                    self.models[horizon][regime] = ens
+                    acc = accuracy_score(y_val, self._predict_cls(ens, X_val))
+                    logger.info(f"  Regime {regime} ({n} rows): val acc {acc:.3f}")
 
         # Metrics on val and test using the fallback ensemble
         y_val_pred  = self._predict_cls(fallback, X_val)
@@ -644,6 +725,33 @@ class MLPredictor:
             logger.error(f"Error predicting (horizon {horizon}): {e}")
             return {"error": str(e)}
 
+    def predict_latest(
+        self,
+        merged_df: pd.DataFrame,
+        feature_cols: List[str],
+        horizon: int = 1,
+        regime: str = REGIME_SIDEWAYS,
+    ) -> Dict:
+        """Forecast the FUTURE `horizon`-day move from the most recent bar.
+
+        `train_model`/`predict` operate on `X_test[-1]`, whose features are
+        `horizon` days stale (the label needs `i + horizon`, so `_build_xy`
+        drops the final `horizon` rows). That row's move is already realized —
+        not a forecast. This scores the true latest feature row (today) with the
+        horizon's fitted scaler so the recorded prediction is genuinely forward
+        looking and aligned with today's entry price.
+        """
+        if horizon not in self.scalers:
+            return {"error": f"No scaler for horizon {horizon}"}
+        try:
+            df_clean = merged_df.dropna(subset=["Close"])
+            latest_raw = df_clean[feature_cols].iloc[[-1]].fillna(0.0).values
+            latest_scaled = self.scalers[horizon].transform(latest_raw)
+            return self.predict(latest_scaled, regime=regime, horizon=horizon)
+        except Exception as e:
+            logger.error(f"Error predicting latest (horizon {horizon}): {e}")
+            return {"error": str(e)}
+
     # ------------------------------------------------------------------
     # Feature importance
     # ------------------------------------------------------------------
@@ -655,7 +763,10 @@ class MLPredictor:
             fallback   = self.models[horizon].get("_fallback")
             if fallback is None:
                 return {}
-            scores     = fallback["xgb"].feature_importances_
+            xgb_for_imp = fallback.get("xgb_raw", fallback["xgb"])
+            if not hasattr(xgb_for_imp, "feature_importances_"):
+                return {}
+            scores     = xgb_for_imp.feature_importances_
             sorted_idx = np.argsort(scores)[::-1][:top_n]
             return {
                 self.feature_columns[i]: float(scores[i])
@@ -721,7 +832,12 @@ class MLPredictor:
             loo_preds   = []
             loo_actuals = []
 
-            for i in range(min_train, train_end):
+            # Stride so we evaluate at most LOOCV_MAX_FOLDS evenly-spaced folds —
+            # LOOCV retrains per fold, so an unbounded loop scales badly on the
+            # 10y window (~1.7k fits/horizon).
+            stride = max(1, (train_end - min_train) // max(1, settings.LOOCV_MAX_FOLDS))
+
+            for i in range(min_train, train_end, stride):
                 X_tr = X_raw[:i]
                 y_tr = y[:i]
                 if len(np.unique(y_tr)) < 2:

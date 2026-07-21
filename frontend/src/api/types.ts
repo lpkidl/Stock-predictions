@@ -135,6 +135,40 @@ export interface OutcomeRecord {
   status: "pending" | "correct" | "incorrect";
 }
 
+export interface RecordedPost {
+  source: string;
+  ticker: string;
+  subreddit: string | null;
+  author: string | null;
+  title: string | null;
+  url: string;
+  engagement_score: number | null;
+  sentiment_label: string | null;
+  sentiment_score: number | null;
+  posted_at: string | null;
+}
+
+export interface DataSourcesResponse {
+  recording: {
+    db_enabled: boolean;
+    total_posts: number;
+    last_recorded: string | null;
+    last_run: {
+      id: number;
+      started_at: string | null;
+      finished_at: string | null;
+      status: string;
+      tickers: string | null;
+    } | null;
+    runs: number;
+    sentiment_days: number;
+  };
+  by_source: { source: string; count: number }[];
+  by_sentiment: { label: string; count: number }[];
+  by_ticker: { ticker: string; count: number; avg_score: number | null }[];
+  posts: RecordedPost[];
+}
+
 export interface TrackRecordResponse {
   summary: {
     overall_accuracy: number | null;

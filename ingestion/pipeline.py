@@ -438,6 +438,7 @@ class DataIngestionPipeline:
         """
         articles: List[Dict] = []
         seen_urls = set()
+        filtered_out = 0
 
         # ── Source 1: Yahoo Finance via yfinance ──────────────────────
         try:
@@ -472,14 +473,18 @@ class DataIngestionPipeline:
                             timestamp = timestamp.replace(tzinfo=None)
                     except Exception:
                         timestamp = datetime.now()
+                summary = content.get("summary", "") or ""
                 if not title or not url or url in seen_urls:
+                    continue
+                if not self._news_is_relevant(ticker, title, summary):
+                    filtered_out += 1
                     continue
                 seen_urls.add(url)
                 articles.append({
                     "source": "news",
                     "ticker": ticker,
                     "title": title,
-                    "text": content.get("summary", "") or "",
+                    "text": summary,
                     "author": publisher,
                     "timestamp": timestamp,
                     "url": url,
@@ -514,6 +519,9 @@ class DataIngestionPipeline:
                         timestamp = datetime.now()
                     if not title or not url or url in seen_urls:
                         continue
+                    if not self._news_is_relevant(ticker, title):
+                        filtered_out += 1
+                        continue
                     seen_urls.add(url)
                     articles.append({
                         "source": "news",
@@ -531,8 +539,21 @@ class DataIngestionPipeline:
         except Exception as e:
             logger.warning(f"Google News RSS fetch failed for {ticker}: {e}")
 
-        logger.info(f"Fetched {len(articles)} news article(s) for {ticker}")
+        logger.info(
+            f"Fetched {len(articles)} relevant news article(s) for {ticker} "
+            f"({filtered_out} off-topic dropped)"
+        )
         return articles
+
+    def _news_is_relevant(self, ticker: str, title: str, text: str = "") -> bool:
+        """True only if the article actually concerns this ticker — its symbol
+        or a company-name alias appears in the title/text. Filters out Yahoo's
+        'related news' and generic market roundups that would otherwise attach
+        an off-topic article's sentiment to the ticker."""
+        hay = f"{title} {text}".lower()
+        if ticker.lower() in hay:
+            return True
+        return any(alias in hay for alias in settings.TICKER_ALIASES.get(ticker, []))
 
     async def fetch_earnings_dates(self, ticker: str) -> List:
         """
