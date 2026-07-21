@@ -30,3 +30,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Coverage artifacts
+.coverage
+.pytest_cache/
