@@ -16,6 +16,7 @@ _logger = _logging.getLogger(__name__)
 from feature_engine.tech_indicators import TechnicalIndicatorEngine
 from feature_engine.market_hours import MarketHoursAligner
 from feature_engine.execution import ExecutionEngine
+from feature_engine.news_sentiment import NewsAnalyzer
 
 # Optional modules — depend on third-party libraries that may not be installed
 try:
