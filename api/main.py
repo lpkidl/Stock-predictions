@@ -80,4 +80,12 @@ if DIST_DIR.is_dir():
             and str(candidate).startswith(str(DIST_DIR.resolve()))
         ):
             return FileResponse(candidate)
-        return FileResponse(DIST_DIR / "index.html")
+        # index.html must never be cached: it maps every route to the current
+        # content-hashed chunk names. If a browser caches it, a redeploy leaves
+        # the tab pointing at deleted chunks → "Failed to fetch dynamically
+        # imported module". no-cache forces revalidation so a reload always gets
+        # the latest chunk map (the hashed /assets files stay immutable-cacheable).
+        return FileResponse(
+            DIST_DIR / "index.html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )

@@ -192,7 +192,14 @@ def build_track_record(history: list[dict], daily_accuracy: list[dict] | None = 
             "accuracy": round(t_correct / len(t_res), 4),
         })
 
-    recent = sorted(resolved, key=lambda r: r.get("predicted_at") or "", reverse=True)[:30]
+    # Order by when each call was JUDGED (its outcome date), not when it was
+    # predicted — a "resolved" view should surface the most recently resolved
+    # predictions. Tie-break on predicted_at so same-outcome-date rows are stable.
+    recent = sorted(
+        resolved,
+        key=lambda r: (r.get("outcome_date") or "", r.get("predicted_at") or ""),
+        reverse=True,
+    )[:30]
     pending_sorted = sorted(pending, key=lambda r: r.get("outcome_date") or "")
 
     return {

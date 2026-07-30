@@ -119,6 +119,53 @@ export default function PerformancePage() {
                 )}
               </div>
             )}
+
+            {m.walk_forward?.selective && (() => {
+              const s = m.walk_forward!.selective!;
+              const gatePct = fmtPct1(s.gate);
+              return (
+                <div className="mt-6 border-t border-hairline pt-5">
+                  <h4 className="text-[16px] font-semibold text-content">
+                    Walk-forward — full vs. high-confidence
+                  </h4>
+                  <p className="mt-0.5 mb-3 text-[12px] text-secondary">
+                    Pooled over {s.n_samples ?? "?"} out-of-sample samples across
+                    all {m.walk_forward!.n_folds} folds. Blind 3-class direction
+                    is near-efficient (~40% ceiling); the tradeable number is
+                    accuracy on the days the model is confident about.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <Metric
+                      label="3-class · all days"
+                      value={fmtPct1(s.pooled_accuracy ?? 0)}
+                      title="Full-coverage accuracy over every out-of-sample day (down/flat/up). Baseline 33%."
+                    />
+                    <Metric
+                      label="Up/Down · all days"
+                      value={fmtPct1(s.binary_accuracy ?? 0)}
+                      title="Full-coverage binary accuracy: an up-or-down call every day, judged by the sign of the move. Baseline 50%."
+                    />
+                    <Metric
+                      label={`3-class · high-conf`}
+                      value={fmtPct1(s.gated_accuracy ?? 0)}
+                      title={`Accuracy on days where calibrated confidence ≥ ${gatePct}. Fires on ${fmtPct1(s.gated_coverage ?? 0)} of days (n=${s.gated_n ?? 0}).`}
+                    />
+                    <Metric
+                      label={`Up/Down · high-conf`}
+                      value={fmtPct1((s.binary_gated_accuracy ?? s.directional_gated_accuracy) ?? 0)}
+                      title={`Binary up-vs-down accuracy on high-confidence days (≥${gatePct}). Baseline 50%. Fires on ${fmtPct1((s.binary_gated_coverage ?? s.directional_gated_coverage) ?? 0)} of days (n=${s.binary_gated_n ?? s.directional_gated_n ?? 0}).`}
+                    />
+                  </div>
+                  <p className="tnum mt-2 text-[12px] text-tertiary">
+                    Gate for this horizon: ≥{gatePct} confidence. High-confidence
+                    up/down fires on{" "}
+                    {fmtPct1((s.binary_gated_coverage ?? s.directional_gated_coverage) ?? 0)}{" "}
+                    of days — fewer signals, higher hit-rate. Up/Down baseline is
+                    50%; 3-class is 33%.
+                  </p>
+                </div>
+              );
+            })()}
           </Disclosure>
         );
       })}
