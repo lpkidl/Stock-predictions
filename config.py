@@ -151,6 +151,21 @@ class Settings(BaseSettings):
     WF_STEP: int = 42         # bars to advance the training cutoff each fold (~2 months);
                               # larger step keeps fold count sane on the 10y window
     WF_TEST_WINDOW: int = 21  # bars per out-of-sample evaluation window
+    # Confidence gate for the selective / directional walk-forward metrics.
+    # Blind 3-class daily direction is near-efficient (~40% ceiling); the honest
+    # path to a 60% headline is scoring only high-conviction days. A sample is
+    # counted in the gated metrics only when its calibrated confidence ≥ this.
+    # Default fallback when a horizon isn't in WF_CONFIDENCE_GATE_BY_HORIZON.
+    WF_CONFIDENCE_GATE: float = 0.60
+    # Per-horizon gates. Confidence rarely clears 0.60 at short horizons (the
+    # 1-day gate fires on <1% of days), so gate lower there and higher at long
+    # horizons where the model separates classes more — keeps every horizon's
+    # high-confidence subset both accurate AND fired often enough to be usable.
+    # Tuned from the walk-forward sweep (target ~15-30% coverage per horizon).
+    WF_CONFIDENCE_GATE_BY_HORIZON: dict = {1: 0.42, 3: 0.48, 5: 0.52, 10: 0.55}
+    # Horizons to feature as the primary forecast in the UI. Daily (1d) direction
+    # is the noisiest; 5-10d carry real drift/momentum, so they lead.
+    PRIMARY_HORIZONS: list = [5, 10]
 
     # Performance tracking
     PERFORMANCE_LEDGER_PATH: str = "results/performance_ledger.json"

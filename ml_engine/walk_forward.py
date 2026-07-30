@@ -14,6 +14,8 @@ from typing import Dict, List
 
 import numpy as np
 import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.frozen import FrozenEstimator
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.preprocessing import StandardScaler
@@ -87,37 +89,38 @@ class WalkForwardBacktester:
         fold_results: List[Dict] = []
         cutoff = self.min_train
 
+        # Per-test-sample accumulators (pooled across every fold). These drive
+        # the selective / directional metrics below, which need sample-level
+        # confidence and realized returns — not just per-fold accuracy.
+        s_true: List[int]   = []
+        s_pred: List[int]   = []
+        s_conf: List[float] = []
+        s_ret:  List[float] = []
+        s_pup:  List[float] = []   # calibrated P(up)   per test sample
+        s_pdn:  List[float] = []   # calibrated P(down) per test sample
+
         while cutoff + self.test_window <= n:
             test_end = min(cutoff + self.test_window, n)
 
             X_tr, y_tr = X_raw[:cutoff],        y[:cutoff]
             X_te, y_te = X_raw[cutoff:test_end], y[cutoff:test_end]
+            r_te       = y_pct[cutoff:test_end]
 
             if len(np.unique(y_tr)) < 2 or len(y_te) == 0:
                 cutoff += self.step
                 continue
 
-            scaler = StandardScaler()
-            X_tr_s = scaler.fit_transform(X_tr)
-            X_te_s = scaler.transform(X_te)
-
             try:
-                sw = (
-                    compute_sample_weight("balanced", y_tr)
-                    if settings.BALANCE_CLASS_WEIGHTS else None
-                )
-                xgb_clf = xgb.XGBClassifier(**self._xgb_params())
-                xgb_clf.fit(X_tr_s, y_tr, sample_weight=sw, verbose=False)
+                proba = self._fold_proba(X_tr, y_tr, X_te)
+                preds = np.argmax(proba, axis=1)
+                conf  = proba[np.arange(len(preds)), preds]
 
-                lr = LogisticRegression(
-                    max_iter=500, C=0.5, class_weight="balanced",
-                    solver="lbfgs", random_state=42,
-                )
-                lr.fit(X_tr_s, y_tr)
-
-                p_xgb = _align_proba(xgb_clf.predict_proba(X_te_s), xgb_clf.classes_)
-                p_lr  = _align_proba(lr.predict_proba(X_te_s),       lr.classes_)
-                preds = np.argmax(0.5 * p_xgb + 0.5 * p_lr, axis=1)
+                s_true.extend(y_te.tolist())
+                s_pred.extend(preds.tolist())
+                s_conf.extend(conf.tolist())
+                s_ret.extend(r_te.tolist())
+                s_pup.extend(proba[:, 2].tolist())   # class 2 = up
+                s_pdn.extend(proba[:, 0].tolist())   # class 0 = down
 
                 fold_results.append({
                     "fold":       len(fold_results) + 1,
@@ -145,11 +148,184 @@ class WalkForwardBacktester:
             "min_accuracy":  float(np.min(accs)),
             "max_accuracy":  float(np.max(accs)),
             "folds":         fold_results,
+            "selective":     self._selective_metrics(
+                np.array(s_true), np.array(s_pred),
+                np.array(s_conf), np.array(s_ret),
+                np.array(s_pup),  np.array(s_pdn), horizon,
+            ),
         }
+        sel = result["selective"]
         logger.info(
             f"Walk-forward h{horizon}d — "
             f"{len(fold_results)} folds | "
             f"mean acc {np.mean(accs):.1%} ± {np.std(accs):.1%} | "
-            f"mean F1 {np.mean(f1s):.3f}"
+            f"pooled {sel['pooled_accuracy']:.1%} | "
+            f"gated@{sel['gate']:.2f} {sel['gated_accuracy']:.1%} (cov {sel['gated_coverage']:.1%}) | "
+            f"dir@{sel['gate']:.2f} {sel['directional_gated_accuracy']:.1%} (cov {sel['directional_gated_coverage']:.1%})"
         )
         return result
+
+    # ------------------------------------------------------------------
+    # Per-fold ensemble → calibrated class probabilities
+    # ------------------------------------------------------------------
+
+    def _fold_proba(
+        self, X_tr: np.ndarray, y_tr: np.ndarray, X_te: np.ndarray
+    ) -> np.ndarray:
+        """Fit the XGB+LR ensemble on one expanding window and return calibrated
+        class probabilities for the test window.
+
+        When CALIBRATE_PROBABILITIES is on we hold out the last 15% of the
+        training window as a calibration set (prefit sigmoid calibration, exactly
+        like `MLPredictor._train_ensemble`) so the reported `confidence` is
+        trustworthy — the selective metrics gate on it. A fresh StandardScaler is
+        fit per fold on the fit slice only, so no future stats leak in.
+        """
+        cal_start = int(len(X_tr) * 0.85)
+        Xin, yin = X_tr[:cal_start], y_tr[:cal_start]
+        Xca, yca = X_tr[cal_start:], y_tr[cal_start:]
+        calibrating = (
+            settings.CALIBRATE_PROBABILITIES
+            and len(Xca) >= 10
+            and len(np.unique(yin)) >= 2
+            and len(np.unique(yca)) >= 2
+        )
+        fit_X_raw, fit_y = (Xin, yin) if calibrating else (X_tr, y_tr)
+
+        scaler   = StandardScaler()
+        fit_X    = scaler.fit_transform(fit_X_raw)
+        X_te_s   = scaler.transform(X_te)
+
+        sw = (
+            compute_sample_weight("balanced", fit_y)
+            if settings.BALANCE_CLASS_WEIGHTS else None
+        )
+        xgb_clf = xgb.XGBClassifier(**self._xgb_params())
+        xgb_clf.fit(fit_X, fit_y, sample_weight=sw, verbose=False)
+        lr = LogisticRegression(
+            max_iter=500, C=0.5, class_weight="balanced",
+            solver="lbfgs", random_state=42,
+        )
+        lr.fit(fit_X, fit_y)
+
+        xgb_model, lr_model = xgb_clf, lr
+        if calibrating:
+            try:
+                Xca_s = scaler.transform(Xca)
+                xgb_model = CalibratedClassifierCV(
+                    FrozenEstimator(xgb_clf), method="sigmoid").fit(Xca_s, yca)
+                lr_model = CalibratedClassifierCV(
+                    FrozenEstimator(lr), method="sigmoid").fit(Xca_s, yca)
+            except Exception:
+                xgb_model, lr_model = xgb_clf, lr
+
+        p_xgb = _align_proba(xgb_model.predict_proba(X_te_s), xgb_model.classes_)
+        p_lr  = _align_proba(lr_model.predict_proba(X_te_s),  lr_model.classes_)
+        return 0.5 * p_xgb + 0.5 * p_lr
+
+    # ------------------------------------------------------------------
+    # Selective / directional metrics
+    # ------------------------------------------------------------------
+
+    def _selective_metrics(
+        self,
+        true: np.ndarray,
+        pred: np.ndarray,
+        conf: np.ndarray,
+        ret:  np.ndarray,
+        p_up:  np.ndarray = None,
+        p_down: np.ndarray = None,
+        horizon: int = None,
+    ) -> Dict:
+        """Compute four honest views of accuracy from pooled test samples:
+
+        1. pooled full-coverage 3-class accuracy (every sample scored);
+        2. confidence-gated 3-class accuracy — only samples whose calibrated
+           confidence clears the (per-horizon) gate, plus coverage (fraction of
+           days it fires) and a threshold sweep for the dashboard;
+        3. directional accuracy — among samples the model calls a direction on
+           (pred != flat), was the sign of the realized move right?
+        4. FULL-COVERAGE binary up/down — collapse the calibrated probabilities
+           to up-vs-down (argmax of P_up vs P_down) on EVERY day, judged by the
+           sign of the realized return. This is the true 2-class metric: baseline
+           50%, and unlike (3) it scores every day, not just non-flat calls.
+        """
+        # Per-horizon gate (falls back to the scalar default).
+        gate = settings.WF_CONFIDENCE_GATE_BY_HORIZON.get(
+            horizon, settings.WF_CONFIDENCE_GATE
+        )
+        total = len(true)
+        if total == 0:
+            return {"gate": gate}
+
+        def _acc(mask):
+            return float(accuracy_score(true[mask], pred[mask])) if mask.sum() else None
+
+        gate_mask = conf >= gate
+        # Directional (subset): fold to up(2)/down(0) by dropping "flat" calls.
+        dir_mask  = pred != 1
+        dir_gate  = dir_mask & gate_mask
+
+        def _dir_acc(mask):
+            if not mask.sum():
+                return None
+            truth = np.where(ret[mask] > 0, 2, 0)
+            return float(accuracy_score(truth, pred[mask]))
+
+        # ---- Full-coverage binary up/down (levers: binary target + gating) ----
+        bin_block = {}
+        if p_up is not None and p_down is not None and len(p_up) == total:
+            bin_pred  = np.where(p_up >= p_down, 2, 0)
+            bin_truth = np.where(ret > 0, 2, 0)
+            denom     = p_up + p_down + 1e-9
+            bin_conf  = np.maximum(p_up, p_down) / denom   # renormalised 2-class conf
+            bin_gate  = bin_conf >= gate
+
+            def _bin_acc(mask):
+                return float(accuracy_score(bin_truth[mask], bin_pred[mask])) if mask.sum() else None
+
+            bin_block = {
+                "binary_accuracy":          _bin_acc(np.ones(total, dtype=bool)),
+                "binary_gated_accuracy":    _bin_acc(bin_gate),
+                "binary_gated_coverage":    float(bin_gate.mean()),
+                "binary_gated_n":           int(bin_gate.sum()),
+            }
+
+        # Threshold sweep so the UI can plot the accuracy/coverage trade-off.
+        sweep = []
+        for th in (0.45, 0.50, 0.55, 0.60, 0.65, 0.70):
+            m  = conf >= th
+            dm = dir_mask & m
+            row = {
+                "threshold":            round(th, 2),
+                "coverage":             float(m.mean()),
+                "accuracy":             _acc(m),
+                "n":                    int(m.sum()),
+                "directional_coverage": float(dm.mean()),
+                "directional_accuracy": _dir_acc(dm),
+                "directional_n":        int(dm.sum()),
+            }
+            if bin_block:
+                bm = bin_conf >= th
+                row["binary_coverage"] = float(bm.mean())
+                row["binary_accuracy"] = (
+                    float(accuracy_score(bin_truth[bm], bin_pred[bm])) if bm.sum() else None
+                )
+                row["binary_n"] = int(bm.sum())
+            sweep.append(row)
+
+        return {
+            "gate":                        gate,
+            "n_samples":                   total,
+            "pooled_accuracy":             _acc(np.ones(total, dtype=bool)),
+            "gated_accuracy":              _acc(gate_mask),
+            "gated_coverage":              float(gate_mask.mean()),
+            "gated_n":                     int(gate_mask.sum()),
+            "directional_accuracy":        _dir_acc(dir_mask),
+            "directional_coverage":        float(dir_mask.mean()),
+            "directional_gated_accuracy":  _dir_acc(dir_gate),
+            "directional_gated_coverage":  float(dir_gate.mean()),
+            "directional_gated_n":         int(dir_gate.sum()),
+            **bin_block,
+            "sweep":                       sweep,
+        }

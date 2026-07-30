@@ -28,7 +28,8 @@ export default function TrackRecordPage() {
   const hasResolved = !!summary && summary.correct + summary.incorrect > 0;
 
   const recentColumns: Column<OutcomeRecord>[] = [
-    { header: "Date", render: (r) => fmtDate(r.predicted_at) },
+    { header: "Resolved", render: (r) => fmtDate(r.outcome_date) },
+    { header: "Predicted", render: (r) => fmtDate(r.predicted_at) },
     { header: "Ticker", render: (r) => <b className="text-content">{r.ticker}</b> },
     { header: "Horizon", render: (r) => `${r.horizon_days}d` },
     { header: "Predicted", render: (r) => r.predicted_direction.toUpperCase() },

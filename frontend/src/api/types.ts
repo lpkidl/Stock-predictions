@@ -73,7 +73,38 @@ export interface HorizonMetrics {
     mean_accuracy?: number;
     std_accuracy?: number;
     mean_f1?: number;
+    selective?: SelectiveMetrics;
   };
+}
+
+export interface SelectiveSweepRow {
+  threshold: number;
+  coverage: number;
+  accuracy: number | null;
+  n: number;
+  directional_coverage: number;
+  directional_accuracy: number | null;
+  directional_n: number;
+}
+
+export interface SelectiveMetrics {
+  gate: number;
+  n_samples?: number;
+  pooled_accuracy?: number | null;
+  gated_accuracy?: number | null;
+  gated_coverage?: number;
+  gated_n?: number;
+  directional_accuracy?: number | null;
+  directional_coverage?: number;
+  directional_gated_accuracy?: number | null;
+  directional_gated_coverage?: number;
+  directional_gated_n?: number;
+  // Full-coverage binary up/down (baseline 50%): a call every day, judged by sign.
+  binary_accuracy?: number | null;
+  binary_gated_accuracy?: number | null;
+  binary_gated_coverage?: number;
+  binary_gated_n?: number;
+  sweep?: SelectiveSweepRow[];
 }
 
 export interface MetricsResponse {
